@@ -49,3 +49,17 @@ class GeminiChatTest {
         assertEquals(ChatException.Kind.DAILY_LIMIT, e.kind)
     }
 }
+
+class ProxyErrorsTest {
+    @Test
+    fun userLimitIsNotTreatedAsGoogleDailyLimit() {
+        val e = GeminiChat.toError(429, """{"error":{"code":429,"message":"Ваш дневной лимит исчерпан","status":"USER_DAILY_LIMIT"}}""")
+        assertEquals(ChatException.Kind.USER_LIMIT, e.kind)
+    }
+
+    @Test
+    fun missingLoginIsAuth() {
+        val e = GeminiChat.toError(401, """{"error":{"code":401,"message":"Войдите в аккаунт.","status":"UNAUTHENTICATED"}}""")
+        assertEquals(ChatException.Kind.AUTH, e.kind)
+    }
+}

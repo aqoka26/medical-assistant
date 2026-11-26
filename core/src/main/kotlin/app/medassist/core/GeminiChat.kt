@@ -25,7 +25,7 @@ data class ReplyResult(val text: String, val finishReason: String?, val model: S
 
 class ChatException(message: String, val kind: Kind = Kind.OTHER, cause: Throwable? = null) :
     Exception(message, cause) {
-    enum class Kind { DAILY_LIMIT, MINUTE_LIMIT, FILE_GONE, OTHER }
+    enum class Kind { DAILY_LIMIT, MINUTE_LIMIT, FILE_GONE, AUTH, USER_LIMIT, OTHER }
 }
 
 /**
@@ -36,12 +36,14 @@ class GeminiChat(
     private val apiKey: String?,
     private val baseUrl: String = BASE,
     private val appToken: String? = null,
+    private val authToken: String? = null,
     private val http: OkHttpClient = defaultClient,
 ) {
     /** With a proxy the key stays on the server; the app only sends its app token. */
     private fun Request.Builder.auth(): Request.Builder = apply {
         if (!apiKey.isNullOrBlank()) header("x-goog-api-key", apiKey)
         if (!appToken.isNullOrBlank()) header("x-app-token", appToken)
+        if (!authToken.isNullOrBlank()) header("Authorization", "Bearer $authToken")
     }
 
 
@@ -227,6 +229,10 @@ class GeminiChat(
             }.getOrNull().orEmpty()
             val lower = (message + body).lowercase()
             return when {
+                // Errors from the owner's proxy server (accounts and per-user limits).
+                "user_daily_limit" in lower -> ChatException(message, ChatException.Kind.USER_LIMIT)
+                "unauthenticated" in lower -> ChatException(message.ifBlank { "Войдите в аккаунт." }, ChatException.Kind.AUTH)
+                "\"blocked\"" in lower -> ChatException(message, ChatException.Kind.AUTH)
                 code == 429 && "perday" in lower -> ChatException(
                     "Исчерпан бесплатный дневной лимит Gemini. Он обновится в полночь по тихоокеанскому времени (около 11:00 по Москве).",
                     ChatException.Kind.DAILY_LIMIT,

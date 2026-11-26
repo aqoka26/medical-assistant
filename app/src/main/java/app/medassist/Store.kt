@@ -25,6 +25,23 @@ class Store(context: Context) {
         }
         set(value) = prefs.edit().putString("model", value.trim()).apply()
 
+    var authToken: String?
+        get() = prefs.getString("auth_token", null)
+        set(value) = prefs.edit().putString("auth_token", value).apply()
+
+    var authLogin: String?
+        get() = prefs.getString("auth_login", null)
+        set(value) = prefs.edit().putString("auth_login", value).apply()
+
+    /** The owner's server answered that accounts are not switched on. */
+    var accountsOff: Boolean
+        get() = prefs.getBoolean("accounts_off", false)
+        set(value) = prefs.edit().putBoolean("accounts_off", value).apply()
+
+    var lockEnabled: Boolean
+        get() = prefs.getBoolean("lock_enabled", false)
+        set(value) = prefs.edit().putBoolean("lock_enabled", value).apply()
+
     var disclaimerAccepted: Boolean
         get() = prefs.getBoolean("disclaimer_accepted", false)
         set(value) = prefs.edit().putBoolean("disclaimer_accepted", value).apply()

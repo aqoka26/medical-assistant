@@ -5,6 +5,8 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.medassist.core.Attachment
+import app.medassist.core.AuthClient
+import app.medassist.core.Usage
 import app.medassist.core.ChatMessage
 import app.medassist.core.ChatException
 import app.medassist.core.GeminiChat
@@ -21,7 +23,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
-enum class Screen { CHAT, HISTORY, SETTINGS }
+enum class Screen { LOGIN, CHAT, HISTORY, SETTINGS }
 
 data class UiState(
     val screen: Screen = Screen.CHAT,
@@ -38,6 +40,14 @@ data class UiState(
     val checkingKey: Boolean = false,
     /** True when the app talks to the owner's proxy and nobody needs a key. */
     val usesProxy: Boolean = false,
+    /** Logged-in account name on the owner's server, if accounts are on. */
+    val login: String? = null,
+    val authBusy: Boolean = false,
+    val usage: Usage? = null,
+    val lockEnabled: Boolean = false,
+    val locked: Boolean = false,
+    /** Text shared into the app from another app, to put into the input box. */
+    val draft: String? = null,
 ) {
     val ready: Boolean get() = usesProxy || apiKey.isNotBlank()
 }
@@ -51,9 +61,19 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private val usesProxy = BuildConfig.PROXY_URL.isNotBlank()
 
+    private val auth by lazy { AuthClient(BuildConfig.PROXY_URL) }
+
     private fun client(key: String = _state.value.apiKey): GeminiChat =
-        if (usesProxy) GeminiChat(apiKey = null, baseUrl = BuildConfig.PROXY_URL, appToken = BuildConfig.APP_TOKEN)
+        if (usesProxy) GeminiChat(
+            apiKey = null,
+            baseUrl = BuildConfig.PROXY_URL,
+            appToken = BuildConfig.APP_TOKEN,
+            authToken = store.authToken,
+        )
         else GeminiChat(key)
+
+    /** The owner's server has accounts unless it told us otherwise. */
+    private fun needsLogin() = usesProxy && store.authToken == null && !store.accountsOff
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -68,18 +88,115 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             model = store.model,
             disclaimerAccepted = store.disclaimerAccepted,
             usesProxy = usesProxy,
-            screen = if (!usesProxy && store.apiKey.isBlank() && store.disclaimerAccepted) Screen.SETTINGS else Screen.CHAT,
+            login = store.authLogin,
+            lockEnabled = store.lockEnabled,
+            locked = store.lockEnabled,
+            screen = when {
+                needsLogin() -> Screen.LOGIN
+                !usesProxy && store.apiKey.isBlank() && store.disclaimerAccepted -> Screen.SETTINGS
+                else -> Screen.CHAT
+            },
         )
     }
 
-    fun show(screen: Screen) = _state.update { it.copy(screen = screen) }
+    fun show(screen: Screen) {
+        _state.update { it.copy(screen = screen) }
+        if (screen == Screen.SETTINGS) refreshUsage()
+    }
+
+    // ---------- accounts ----------
+
+    fun login(login: String, password: String) = authenticate { auth.login(login, password) }
+
+    fun register(login: String, password: String, invite: String) =
+        authenticate { auth.register(login, password, invite) }
+
+    private fun authenticate(call: () -> app.medassist.core.Account) {
+        _state.update { it.copy(authBusy = true) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val account = call()
+                store.authToken = account.token
+                store.authLogin = account.login
+                store.accountsOff = false
+                _state.update {
+                    it.copy(
+                        authBusy = false, login = account.login, screen = Screen.CHAT,
+                        usage = Usage(account.login, account.usedToday, account.dailyLimit),
+                        notice = "Вы вошли как ${account.login}",
+                    )
+                }
+            } catch (e: Exception) {
+                val msg = e.message ?: "Не удалось войти"
+                if ("не включены" in msg) {
+                    // The server has no accounts yet: work without login.
+                    store.accountsOff = true
+                    _state.update { it.copy(authBusy = false, screen = Screen.CHAT) }
+                } else {
+                    _state.update { it.copy(authBusy = false, notice = msg) }
+                }
+            }
+        }
+    }
+
+    fun logout() {
+        val token = store.authToken
+        store.authToken = null
+        store.authLogin = null
+        _state.update { it.copy(login = null, usage = null, screen = Screen.LOGIN) }
+        if (token != null) viewModelScope.launch(Dispatchers.IO) { auth.logout(token) }
+    }
+
+    private fun refreshUsage() {
+        val token = store.authToken ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { auth.me(token) }.onSuccess { u -> _state.update { it.copy(usage = u) } }
+        }
+    }
+
+    private fun onAuthLost() {
+        store.authToken = null
+        store.authLogin = null
+        store.accountsOff = false
+        _state.update { it.copy(login = null, usage = null, screen = Screen.LOGIN) }
+    }
+
+    // ---------- app lock ----------
+
+    fun setLockEnabled(enabled: Boolean) {
+        store.lockEnabled = enabled
+        _state.update { it.copy(lockEnabled = enabled) }
+    }
+
+    fun lock() {
+        if (store.lockEnabled) _state.update { it.copy(locked = true) }
+    }
+
+    fun unlock() = _state.update { it.copy(locked = false) }
+
+    // ---------- sharing into the app ----------
+
+    fun receiveShared(uris: List<Uri>, text: String?) {
+        if (uris.isNotEmpty()) addFiles(uris)
+        if (!text.isNullOrBlank()) _state.update { it.copy(draft = text) }
+        _state.update { if (it.screen == Screen.LOGIN) it else it.copy(screen = Screen.CHAT) }
+    }
+
+    fun clearDraft() = _state.update { it.copy(draft = null) }
 
     fun clearNotice() = _state.update { it.copy(notice = null) }
 
     fun acceptDisclaimer() {
         store.disclaimerAccepted = true
         _state.update {
-            it.copy(disclaimerAccepted = true, screen = if (!it.ready) Screen.SETTINGS else it.screen)
+            it.copy(
+                disclaimerAccepted = true,
+                screen = when {
+                    needsLogin() -> Screen.LOGIN
+                    !it.ready -> Screen.SETTINGS
+                    else -> it.screen
+                },
+            )
         }
     }
 
@@ -223,6 +340,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
             } catch (e: Exception) {
+                if (e is ChatException && e.kind == ChatException.Kind.AUTH) onAuthLost()
                 val note = e.message ?: "Неизвестная ошибка"
                 conversation = conversation.copy(
                     messages = conversation.messages +
@@ -231,6 +349,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
             persist(conversation)
             _state.update { it.copy(sending = false, streamingText = null, status = null) }
+            refreshUsage()
         }
     }
 

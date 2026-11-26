@@ -17,8 +17,10 @@ class FileImporter(private val context: Context, private val store: Store) {
 
     fun import(uri: Uri): Attachment {
         val resolver = context.contentResolver
-        val mime = resolver.getType(uri) ?: guessMime(uri)
         val name = displayName(uri) ?: "file"
+        // Some apps (for example EMIAS) share PDFs as a generic binary type; trust the file name then.
+        val reported = resolver.getType(uri)
+        val mime = if (reported == null || reported == "application/octet-stream") guessMime(name) else reported
 
         if (mime.startsWith("image/")) {
             val bitmap = decodeImage(uri)
@@ -69,10 +71,12 @@ class FileImporter(private val context: Context, private val store: Store) {
             if (c.moveToFirst()) c.getString(0) else null
         } ?: uri.lastPathSegment
 
-    private fun guessMime(uri: Uri): String = when (uri.toString().substringAfterLast('.').lowercase()) {
+    private fun guessMime(name: String): String = when (name.substringAfterLast('.').lowercase()) {
         "pdf" -> SupportedFiles.PDF
         "jpg", "jpeg" -> "image/jpeg"
         "png" -> "image/png"
+        "webp" -> "image/webp"
+        "heic", "heif" -> "image/heic"
         "txt" -> "text/plain"
         else -> "application/octet-stream"
     }
