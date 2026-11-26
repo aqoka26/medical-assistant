@@ -7,6 +7,15 @@ plugins {
 
 val buildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
 
+// Proxy address: from the PROXY_URL build variable, or else from app/proxy.properties.
+val proxyProps = java.util.Properties().apply {
+    val f = file("proxy.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+val proxyUrl = (System.getenv("PROXY_URL")?.takeIf { it.isNotBlank() } ?: proxyProps.getProperty("PROXY_URL", ""))
+    .trim().trimEnd('/')
+val appToken = System.getenv("APP_TOKEN")?.takeIf { it.isNotBlank() } ?: proxyProps.getProperty("APP_TOKEN", "")
+
 android {
     namespace = "app.medassist"
     compileSdk = 35
@@ -19,8 +28,8 @@ android {
         versionName = "1.0.$buildNumber"
         // Address of your Cloudflare proxy and its app token, passed in by the GitHub build.
         // When PROXY_URL is empty the app falls back to asking each user for their own key.
-        buildConfigField("String", "PROXY_URL", "\"${System.getenv("PROXY_URL").orEmpty().trimEnd('/')}\"")
-        buildConfigField("String", "APP_TOKEN", "\"${System.getenv("APP_TOKEN").orEmpty()}\"")
+        buildConfigField("String", "PROXY_URL", "\"$proxyUrl\"")
+        buildConfigField("String", "APP_TOKEN", "\"${appToken.trim()}\"")
     }
 
     signingConfigs {
