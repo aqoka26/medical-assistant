@@ -245,7 +245,7 @@ fun LabsScreen(state: UiState, vm: ChatViewModel) {
     val a = LocalAccents.current
 
     Column(Modifier.fillMaxSize()) {
-        TabTitle("Анализы", subtitle = state.profile.name)
+        TabTitle("Анализы", subtitle = state.profile.name.takeIf { state.profileId != app.medassist.core.Profile.ME })
         if (all.isEmpty()) {
             Column(
                 Modifier.fillMaxSize().padding(32.dp),

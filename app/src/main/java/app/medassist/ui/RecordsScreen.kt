@@ -57,7 +57,7 @@ fun RecordsScreen(state: UiState, vm: ChatViewModel) {
     var toDelete by remember { mutableStateOf<Conversation?>(null) }
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            TabTitle("Разборы", subtitle = state.profile.name)
+            TabTitle("Разборы", subtitle = state.profile.name.takeIf { state.profileId != app.medassist.core.Profile.ME })
             if (state.profileConversations.isEmpty()) {
                 Column(
                     Modifier.fillMaxSize().padding(32.dp),

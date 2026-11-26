@@ -232,9 +232,7 @@ private fun FamilyRow(state: UiState, vm: ChatViewModel, onAdd: () -> Unit) {
                 color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
                 border = if (selected) null else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
-                Row(Modifier.padding(start = 6.dp, end = 14.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Avatar(p.name, 26, inverted = selected)
-                    Spacer(Modifier.width(8.dp))
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         p.name,
                         style = MaterialTheme.typography.labelLarge,

@@ -108,9 +108,12 @@ fun ReportScreen(state: UiState, vm: ChatViewModel) {
     val liveReport = if (state.sending && reportMsg == null) Report.parse(state.streamingText.orEmpty()) else null
 
     val listState = rememberLazyListState()
+    // Scroll down only when a new question or answer appears, not when the report is opened.
+    var seen by remember(conversation.id) { mutableStateOf(rest.size) }
     LaunchedEffect(rest.size, state.sending) {
         val n = listState.layoutInfo.totalItemsCount
-        if (rest.isNotEmpty() && reportMsg != null && n > 1) listState.animateScrollToItem(n - 2)
+        if ((rest.size > seen || (state.sending && reportMsg != null)) && n > 1) listState.animateScrollToItem(n - 2)
+        seen = rest.size
     }
 
     Column(Modifier.fillMaxSize().imePadding()) {
