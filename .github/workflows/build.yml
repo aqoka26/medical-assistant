@@ -22,6 +22,18 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Check the proxy server answers
+        run: |
+          URL=$(grep '^PROXY_URL=' app/proxy.properties | cut -d= -f2-)
+          if [ -n "$URL" ]; then
+            curl -sS -m 30 "$URL/"; echo
+            # Lists models: confirms the server has a working Gemini key (uses no message quota).
+            code=$(curl -sS -m 30 -o models.json -w '%{http_code}' "$URL/v1beta/models")
+            echo "HTTP $code"; head -c 300 models.json; echo
+            grep -o '"name": *"models/gemini-[^"]*"' models.json | head -20 || true
+            test "$code" = "200"
+          fi
+
       - name: Test and build
         env:
           # Set in GitHub: Settings > Secrets and variables > Actions.
