@@ -6,7 +6,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.medassist.core.Attachment
 import app.medassist.core.ChatMessage
-import app.medassist.core.ClaudeChat
+import app.medassist.core.ChatException
+import app.medassist.core.GeminiChat
 import app.medassist.core.Conversation
 import app.medassist.core.Role
 import kotlinx.coroutines.Dispatchers
@@ -32,7 +33,9 @@ data class UiState(
     val status: String? = null,
     val notice: String? = null,
     val apiKey: String = "",
+    val model: String = GeminiChat.DEFAULT_MODEL,
     val disclaimerAccepted: Boolean = false,
+    val checkingKey: Boolean = false,
 )
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
@@ -52,6 +55,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             conversations = all,
             current = current,
             apiKey = store.apiKey,
+            model = store.model,
             disclaimerAccepted = store.disclaimerAccepted,
             screen = if (store.apiKey.isBlank() && store.disclaimerAccepted) Screen.SETTINGS else Screen.CHAT,
         )
@@ -68,9 +72,22 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun saveApiKey(key: String) {
-        store.apiKey = key
-        _state.update { it.copy(apiKey = key.trim(), screen = Screen.CHAT, notice = "Ключ сохранён") }
+    fun saveSettings(key: String, model: String) {
+        val k = key.trim()
+        val m = model.trim().ifBlank { GeminiChat.DEFAULT_MODEL }
+        _state.update { it.copy(checkingKey = true) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val error = runCatching { GeminiChat(k).checkKey() }.exceptionOrNull()
+            if (error == null) {
+                store.apiKey = k
+                store.model = m
+                _state.update {
+                    it.copy(apiKey = k, model = m, checkingKey = false, screen = Screen.CHAT, notice = "Ключ работает и сохранён")
+                }
+            } else {
+                _state.update { it.copy(checkingKey = false, notice = error.message ?: "Ключ не подошёл") }
+            }
+        }
     }
 
     fun newConversation() {
@@ -87,14 +104,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun delete(conversation: Conversation) {
         if (_state.value.sending && _state.value.current?.id == conversation.id) return
-        val key = _state.value.apiKey
-        viewModelScope.launch(Dispatchers.IO) {
-            // Also remove the uploaded copies from Anthropic's file storage.
-            if (key.isNotBlank()) {
-                val chat = ClaudeChat(key)
-                conversation.messages.flatMap { it.attachments }.mapNotNull { it.remoteId }.forEach(chat::deleteRemote)
-            }
-        }
+        // Copies uploaded to Google are deleted by Google automatically after 48 hours.
         store.delete(conversation)
         _state.update { s ->
             s.copy(
@@ -148,7 +158,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         runReply(conversation)
     }
 
-    /** Sends the conversation again after an error (error notes are never sent to Claude). */
+    /** Sends the conversation again after an error (error notes are never sent to the model). */
     fun retry() {
         val conversation = _state.value.current ?: return
         if (_state.value.sending) return
@@ -157,16 +167,36 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun runReply(start: Conversation) {
         val key = _state.value.apiKey
+        val model = _state.value.model
         _state.update { it.copy(sending = true, streamingText = null, status = "Отправка…") }
         viewModelScope.launch(Dispatchers.IO) {
             var conversation = start
             try {
-                val chat = ClaudeChat(key)
-                conversation = uploadMissing(chat, conversation)
+                val chat = GeminiChat(key)
+                conversation = refreshUploads(chat, conversation, force = false)
                 persist(conversation)
-                _state.update { it.copy(status = "Claude изучает данные…") }
-                val result = chat.reply(systemPrompt, conversation.messages) { partial ->
-                    _state.update { it.copy(streamingText = partial, status = null) }
+                val onText: (String) -> Unit = { partial -> _state.update { it.copy(streamingText = partial, status = null) } }
+                val ask: (String) -> app.medassist.core.ReplyResult = { m ->
+                    _state.update { it.copy(status = "Gemini изучает данные…") }
+                    chat.reply(m, systemPrompt, conversation.messages, onText)
+                }
+                val result = try {
+                    ask(model)
+                } catch (e: ChatException) {
+                    when {
+                        e.kind == ChatException.Kind.FILE_GONE -> {
+                            conversation = refreshUploads(chat, conversation, force = true)
+                            persist(conversation)
+                            ask(model)
+                        }
+                        e.kind == ChatException.Kind.DAILY_LIMIT && model != GeminiChat.LITE_MODEL -> {
+                            _state.update {
+                                it.copy(notice = "Дневной лимит основной модели исчерпан, отвечает облегчённая модель")
+                            }
+                            ask(GeminiChat.LITE_MODEL)
+                        }
+                        else -> throw e
+                    }
                 }
                 val now = System.currentTimeMillis()
                 if (result.text.isNotBlank()) {
@@ -174,9 +204,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         messages = conversation.messages + ChatMessage(Role.ASSISTANT, result.text, timestamp = now)
                     )
                 }
-                ClaudeChat.describeStop(result.stopReason)?.let { note ->
+                val note = GeminiChat.describeFinish(result.finishReason)
+                    ?: if (result.text.isBlank()) "Пустой ответ. Нажмите «Повторить»." else null
+                note?.let {
                     conversation = conversation.copy(
-                        messages = conversation.messages + ChatMessage(Role.ASSISTANT, note, timestamp = now, isError = true)
+                        messages = conversation.messages + ChatMessage(Role.ASSISTANT, it, timestamp = now, isError = true)
                     )
                 }
             } catch (e: Exception) {
@@ -191,14 +223,19 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun uploadMissing(chat: ClaudeChat, conversation: Conversation): Conversation {
+    /** Uploads files that were never uploaded or whose 48-hour server copy has expired. */
+    private fun refreshUploads(chat: GeminiChat, conversation: Conversation, force: Boolean): Conversation {
+        val now = System.currentTimeMillis()
+        fun stale(a: Attachment) =
+            force || a.remoteId == null || now - a.uploadedAt > GeminiChat.FILE_LIFETIME_MS
         val messages = conversation.messages.map { msg ->
-            if (msg.attachments.all { it.remoteId != null }) return@map msg
+            if (msg.attachments.none(::stale)) return@map msg
             msg.copy(attachments = msg.attachments.map { a ->
-                if (a.remoteId != null) return@map a
+                if (!stale(a)) return@map a
                 _state.update { it.copy(status = "Загрузка файла «${a.displayName}»…") }
-                val bytes = store.attachmentFile(a.localName).readBytes()
-                a.copy(remoteId = chat.upload(bytes, a.displayName, a.mimeType))
+                val file = store.attachmentFile(a.localName)
+                if (!file.exists()) throw ChatException("Файл «${a.displayName}» пропал с телефона. Начните новый разбор.")
+                a.copy(remoteId = chat.upload(file.readBytes(), a.displayName, a.mimeType), uploadedAt = now)
             })
         }
         return conversation.copy(messages = messages)

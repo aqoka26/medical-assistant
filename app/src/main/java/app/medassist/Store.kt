@@ -16,6 +16,10 @@ class Store(context: Context) {
         get() = prefs.getString("api_key", "") ?: ""
         set(value) = prefs.edit().putString("api_key", value.trim()).apply()
 
+    var model: String
+        get() = prefs.getString("model", null) ?: app.medassist.core.GeminiChat.DEFAULT_MODEL
+        set(value) = prefs.edit().putString("model", value.trim()).apply()
+
     var disclaimerAccepted: Boolean
         get() = prefs.getBoolean("disclaimer_accepted", false)
         set(value) = prefs.edit().putBoolean("disclaimer_accepted", value).apply()

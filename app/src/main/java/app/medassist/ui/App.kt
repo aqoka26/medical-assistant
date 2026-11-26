@@ -54,6 +54,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -79,6 +80,7 @@ import app.medassist.Screen
 import app.medassist.UiState
 import app.medassist.core.ChatMessage
 import app.medassist.core.Conversation
+import app.medassist.core.GeminiChat
 import app.medassist.core.Role
 import com.mikepenz.markdown.m3.Markdown
 import java.io.File
@@ -120,11 +122,12 @@ private fun DisclaimerDialog(onAccept: () -> Unit) {
         title = { Text("Важно") },
         text = {
             Text(
-                "Это приложение помогает разобраться в медицинских документах с помощью ИИ (Claude). " +
+                "Это приложение помогает разобраться в медицинских документах с помощью ИИ (Google Gemini). " +
                     "Оно не ставит диагноз и не заменяет врача. ИИ может ошибаться.\n\n" +
                     "При опасных симптомах (боль в груди, затруднённое дыхание, потеря сознания, " +
                     "сильное кровотечение, признаки инсульта) сразу звоните 103 или 112.\n\n" +
-                    "Ваши файлы и вопросы отправляются в компанию Anthropic для обработки."
+                    "Ваши файлы и вопросы отправляются в Google. На бесплатном тарифе Google может " +
+                    "использовать их для улучшения своих моделей."
             )
         },
         confirmButton = { Button(onClick = onAccept) { Text("Понятно") } },
@@ -397,7 +400,7 @@ private fun HistoryScreen(state: UiState, vm: ChatViewModel) {
         AlertDialog(
             onDismissRequest = { toDelete = null },
             title = { Text("Удалить разбор?") },
-            text = { Text("«${c.title}» и все его файлы будут удалены с телефона и с сервера. Это нельзя отменить.") },
+            text = { Text("«${c.title}» и все его файлы будут удалены с телефона. Это нельзя отменить.") },
             confirmButton = {
                 TextButton(onClick = { vm.delete(c); toDelete = null }) { Text("Удалить") }
             },
@@ -406,11 +409,13 @@ private fun HistoryScreen(state: UiState, vm: ChatViewModel) {
     }
 }
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsScreen(state: UiState, vm: ChatViewModel) {
     BackHandler { vm.show(Screen.CHAT) }
     var key by rememberSaveable { mutableStateOf(state.apiKey) }
+    var model by rememberSaveable { mutableStateOf(state.model) }
     var visible by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
@@ -427,35 +432,65 @@ private fun SettingsScreen(state: UiState, vm: ChatViewModel) {
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Ключ API Claude", style = MaterialTheme.typography.titleMedium)
+            Text("Бесплатный ключ Google Gemini", style = MaterialTheme.typography.titleMedium)
             Text(
-                "1. Откройте console.anthropic.com и войдите.\n" +
-                    "2. Пополните баланс в разделе Billing.\n" +
-                    "3. В разделе API Keys нажмите Create Key и скопируйте ключ (начинается с sk-ant-).\n" +
-                    "4. Вставьте его сюда и нажмите «Сохранить».",
+                "1. Откройте aistudio.google.com и войдите в Google-аккаунт.\n" +
+                    "2. Нажмите «Get API key», затем «Create API key».\n" +
+                    "3. Скопируйте ключ (начинается с AIza…).\n" +
+                    "4. Вставьте его сюда и нажмите «Проверить и сохранить».\n" +
+                    "Карта не нужна.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             OutlinedTextField(
                 value = key,
                 onValueChange = { key = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("sk-ant-…") },
+                label = { Text("AIza…") },
                 singleLine = true,
                 visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { vm.saveApiKey(key) }, enabled = key.isNotBlank()) { Text("Сохранить") }
+                Button(
+                    onClick = { vm.saveSettings(key, model) },
+                    enabled = key.isNotBlank() && !state.checkingKey,
+                ) { Text(if (state.checkingKey) "Проверяю…" else "Проверить и сохранить") }
                 OutlinedButton(onClick = { visible = !visible }) { Text(if (visible) "Скрыть" else "Показать") }
             }
-            Spacer(Modifier.width(1.dp))
-            Text(
-                "Ключ хранится только на этом телефоне. Никому не передавайте его и не публикуйте: " +
-                    "по нему тратятся деньги с вашего баланса.",
-                style = MaterialTheme.typography.bodySmall,
+
+            Text("Модель", style = MaterialTheme.typography.titleMedium)
+            listOf(
+                GeminiChat.DEFAULT_MODEL to "умнее, около 20 запросов в день бесплатно",
+                GeminiChat.LITE_MODEL to "проще, около 500 запросов в день бесплатно",
+            ).forEach { (id, hint) ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { model = id },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = model == id, onClick = { model = id })
+                    Column {
+                        Text(id)
+                        Text(hint, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            OutlinedTextField(
+                value = model,
+                onValueChange = { model = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Или впишите другую модель") },
+                singleLine = true,
             )
             Text(
-                "Модель: Claude Opus 5.5. Файлы и сообщения отправляются в Anthropic для обработки; " +
-                    "при удалении разбора файлы удаляются и с сервера.",
+                "Если дневной лимит основной модели закончится, приложение само переключится на облегчённую. " +
+                    "Лимиты обновляются в полночь по тихоокеанскому времени (около 11:00 по Москве). " +
+                    "Изменение модели сохраняется кнопкой «Проверить и сохранить».",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.width(1.dp))
+            Text(
+                "Ключ хранится только на этом телефоне. Файлы и сообщения отправляются в Google; " +
+                    "на бесплатном тарифе Google может использовать их для улучшения своих моделей. " +
+                    "Копии файлов на сервере Google удаляются автоматически через 48 часов.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }

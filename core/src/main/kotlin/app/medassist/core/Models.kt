@@ -7,8 +7,8 @@ enum class Role { USER, ASSISTANT }
 
 /**
  * A file the user attached. The bytes live on the phone ([localName] inside the app's
- * private folder) and, after the first upload, in the Anthropic Files API ([remoteId]).
- * Sending only the file id keeps every request small, even with dozens of documents.
+ * private folder). Gemini keeps uploaded files for 48 hours only, so [remoteId] (the file
+ * URI) is refreshed by uploading again when [uploadedAt] is too old.
  */
 @Serializable
 data class Attachment(
@@ -16,6 +16,7 @@ data class Attachment(
     val displayName: String,
     val mimeType: String,
     val remoteId: String? = null,
+    val uploadedAt: Long = 0,
 )
 
 @Serializable
