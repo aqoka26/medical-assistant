@@ -85,7 +85,8 @@ fun App(vm: ChatViewModel, onUnlock: () -> Unit, canUseLock: () -> Boolean) {
             state.screen == Screen.REPORT -> ReportScreen(state, vm)
             else -> Column(Modifier.fillMaxSize()) {
                 BackHandler(enabled = state.screen != Screen.HOME) { vm.show(Screen.HOME) }
-                Box(Modifier.weight(1f)) {
+                // Tabs scroll below a solid status bar area.
+                Box(Modifier.weight(1f).statusBarsPadding()) {
                     when (state.screen) {
                         Screen.RECORDS -> RecordsScreen(state, vm)
                         Screen.LABS -> LabsScreen(state, vm)

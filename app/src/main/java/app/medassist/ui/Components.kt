@@ -117,7 +117,6 @@ fun TabTitle(title: String, subtitle: String? = null, trailing: @Composable RowS
     Row(
         Modifier
             .fillMaxWidth()
-            .statusBarsPadding()
             .padding(start = 20.dp, end = 12.dp, top = 18.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

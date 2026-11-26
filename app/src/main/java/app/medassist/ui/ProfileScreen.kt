@@ -202,7 +202,7 @@ fun ProfileScreen(state: UiState, vm: ChatViewModel, canUseLock: () -> Boolean) 
             SectionLabel("Качество разбора")
             AppCard(padding = 12.dp) {
                 listOf(
-                    GeminiChat.DEFAULT_MODEL to ("Подробный" to "Умнее и внимательнее. Лимит Google меньше."),
+                    GeminiChat.DEFAULT_MODEL to ("Подробный" to "Умнее и внимательнее. Подходит для полного разбора."),
                     GeminiChat.LITE_MODEL to ("Быстрый" to "Быстрее и проще. Подходит для простых вопросов."),
                 ).forEach { (id, t) ->
                     Row(
