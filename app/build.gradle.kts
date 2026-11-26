@@ -32,6 +32,8 @@ android {
         // When PROXY_URL is empty the app falls back to asking each user for their own key.
         buildConfigField("String", "PROXY_URL", "\"$proxyUrl\"")
         buildConfigField("String", "APP_TOKEN", "\"${appToken.trim()}\"")
+        // Sample data for design screenshots; only the CI screenshot build sets DEMO=1.
+        buildConfigField("boolean", "DEMO", if (System.getenv("DEMO") == "1") "true" else "false")
     }
 
     signingConfigs {
@@ -46,7 +48,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("shared")
         }
         debug {
@@ -98,6 +102,7 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.fragment:fragment-ktx:1.8.5")

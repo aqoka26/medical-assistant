@@ -5,20 +5,32 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.PictureAsPdf
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -33,76 +45,62 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import app.medassist.core.Report
 
 val BrandGradient: Brush
-    get() = Brush.linearGradient(listOf(Brand.TealDark, Brand.Teal, Brand.Mint))
+    get() = Brush.linearGradient(listOf(Color(0xFF0B7A75), Color(0xFF13958C), Color(0xFF2F8FB8)))
 
-/** Round logo: white medical cross on a teal gradient. */
+/** Rounded-square mark with a white cross. */
 @Composable
 fun AppLogo(size: Dp, modifier: Modifier = Modifier) {
     Box(
         modifier
             .size(size)
-            .clip(CircleShape)
+            .clip(RoundedCornerShape(size * 0.3f))
             .background(BrandGradient),
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(size * 0.5f)) {
+        Canvas(Modifier.size(size * 0.46f)) {
             val w = this.size.width
-            val bar = w * 0.32f
-            val r = CornerRadius(bar * 0.25f, bar * 0.25f)
+            val bar = w * 0.34f
+            val r = CornerRadius(bar * 0.3f, bar * 0.3f)
             drawRoundRect(Color.White, Offset((w - bar) / 2, 0f), Size(bar, w), r)
             drawRoundRect(Color.White, Offset(0f, (w - bar) / 2), Size(w, bar), r)
         }
     }
 }
 
-/** Gradient header used on every screen. */
+/** Plain top bar for inner screens: back arrow, title, optional actions. */
 @Composable
-fun BrandHeader(
+fun TopBar(
     title: String,
     subtitle: String? = null,
-    navigation: (@Composable () -> Unit)? = null,
+    onBack: (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
-    onTitleClick: (() -> Unit)? = null,
 ) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .background(BrandGradient)
-    ) {
+    Surface(color = MaterialTheme.colorScheme.surface) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 10.dp),
+                .statusBarsPadding()
+                .height(64.dp)
+                .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (navigation != null) navigation() else {
-                Spacer(Modifier.width(8.dp))
-                AppLogo(36.dp)
-                Spacer(Modifier.width(10.dp))
-            }
-            Column(
-                Modifier
-                    .weight(1f)
-                    .then(if (onTitleClick != null) Modifier.clickable(onClick = onTitleClick) else Modifier),
-            ) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            if (onBack != null) {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Назад") }
+            } else Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f).padding(start = 4.dp)) {
+                Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (subtitle != null) {
                     Text(
                         subtitle,
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.85f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -113,47 +111,134 @@ fun BrandHeader(
     }
 }
 
-/** Numbered step used in the help cards. */
+/** Large title used at the top of each tab. */
 @Composable
-fun StepRow(number: Int, text: String) {
-    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Box(
-            Modifier
-                .size(26.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center,
+fun TabTitle(title: String, subtitle: String? = null, trailing: @Composable RowScope.() -> Unit = {}) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(start = 20.dp, end = 12.dp, top = 18.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            if (subtitle != null) {
+                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text(title, style = MaterialTheme.typography.headlineMedium)
+        }
+        trailing()
+    }
+}
+
+/** White card with a hairline border: the basic building block of every screen. */
+@Composable
+fun AppCard(
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    color: Color = MaterialTheme.colorScheme.surface,
+    border: Boolean = true,
+    padding: Dp = 18.dp,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val shape = MaterialTheme.shapes.large
+    val stroke = if (border) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null
+    if (onClick != null) {
+        Surface(onClick = onClick, modifier = modifier.fillMaxWidth(), shape = shape, color = color, border = stroke) {
+            Column(Modifier.padding(padding), content = content)
+        }
+    } else {
+        Surface(modifier = modifier.fillMaxWidth(), shape = shape, color = color, border = stroke) {
+            Column(Modifier.padding(padding), content = content)
+        }
+    }
+}
+
+@Composable
+fun SectionLabel(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleMedium,
+        modifier = modifier.padding(start = 4.dp, top = 8.dp, bottom = 2.dp),
+    )
+}
+
+/** Soft coloured square with an icon. */
+@Composable
+fun IconTile(icon: ImageVector, tint: Color, background: Color, size: Dp = 44.dp) {
+    Box(
+        Modifier
+            .size(size)
+            .clip(RoundedCornerShape(size * 0.32f))
+            .background(background),
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(size * 0.52f)) }
+}
+
+/** One tappable row: icon, title, hint, chevron. */
+@Composable
+fun NavRow(icon: ImageVector, tint: Color, bg: Color, title: String, hint: String? = null, onClick: () -> Unit) {
+    Surface(onClick = onClick, color = Color.Transparent, shape = MaterialTheme.shapes.medium) {
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                number.toString(),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            IconTile(icon, tint, bg, 40.dp)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                if (hint != null) {
+                    Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Icon(
+                Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 3.dp))
     }
 }
 
-/** Emoji in a tinted circle, for feature lists. */
+data class StatusLook(val label: String, val color: Color, val bg: Color)
+
 @Composable
-fun FeatureRow(emoji: String, title: String, text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.size(44.dp)) {
-            Box(contentAlignment = Alignment.Center) { Text(emoji, style = MaterialTheme.typography.titleLarge) }
-        }
-        Column {
-            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+fun statusLook(status: Report.Status?): StatusLook {
+    val a = LocalAccents.current
+    return when (status) {
+        Report.Status.NORMAL -> StatusLook("Без серьёзных отклонений", a.good, a.goodBg)
+        Report.Status.ATTENTION -> StatusLook("Есть на что обратить внимание", a.warn, a.warnBg)
+        Report.Status.URGENT -> StatusLook("Требует срочного внимания", a.bad, a.badBg)
+        null -> StatusLook("Разбор", MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)
     }
 }
 
-/** Three pulsing dots shown while the answer is being written. */
+@Composable
+fun StatusChip(status: Report.Status?, short: Boolean = false) {
+    val look = statusLook(status)
+    val text = if (!short) look.label else when (status) {
+        Report.Status.NORMAL -> "Норма"
+        Report.Status.ATTENTION -> "Внимание"
+        Report.Status.URGENT -> "Срочно"
+        null -> "Готово"
+    }
+    Row(
+        Modifier
+            .clip(CircleShape)
+            .background(look.bg)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(7.dp).clip(CircleShape).background(look.color))
+        Spacer(Modifier.width(6.dp))
+        Text(text, style = MaterialTheme.typography.labelMedium, color = look.color)
+    }
+}
+
 @Composable
 fun TypingDots(color: Color = MaterialTheme.colorScheme.primary) {
     val transition = rememberInfiniteTransition(label = "typing")
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
         repeat(3) { i ->
             val alpha by transition.animateFloat(
                 initialValue = 0.25f,
@@ -161,19 +246,16 @@ fun TypingDots(color: Color = MaterialTheme.colorScheme.primary) {
                 animationSpec = infiniteRepeatable(tween(500, delayMillis = i * 160), RepeatMode.Reverse),
                 label = "dot$i",
             )
-            Box(
-                Modifier
-                    .size(7.dp)
-                    .alpha(alpha)
-                    .clip(CircleShape)
-                    .background(color)
-            )
+            Box(Modifier.size(8.dp).alpha(alpha).clip(CircleShape).background(color))
         }
     }
 }
 
-fun fileIcon(mime: String) = when {
-    mime.startsWith("image/") -> "🖼"
-    mime == "application/pdf" -> "📄"
-    else -> "📝"
+fun fileIcon(mime: String): ImageVector = when {
+    mime.startsWith("image/") -> Icons.Outlined.Image
+    mime == "application/pdf" -> Icons.Outlined.PictureAsPdf
+    else -> Icons.Outlined.Description
 }
+
+@Composable
+fun Gap(h: Dp) = Spacer(Modifier.height(h))

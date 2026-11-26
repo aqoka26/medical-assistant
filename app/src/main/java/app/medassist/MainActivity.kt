@@ -36,6 +36,7 @@ class MainActivity : FragmentActivity() {
             }
         }
         if (savedInstanceState == null) handleShare(intent)
+        if (BuildConfig.DEMO) intent?.getStringExtra("demo")?.let(viewModel::demo)
     }
 
     override fun onNewIntent(intent: Intent) {

@@ -58,7 +58,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import app.medassist.ChatViewModel
-import app.medassist.Screen
+import androidx.compose.material.icons.automirrored.outlined.ShowChart
+import androidx.compose.ui.text.style.TextAlign
 import app.medassist.UiState
 import app.medassist.core.LabResult
 import app.medassist.core.Profile
@@ -78,7 +79,7 @@ fun ProfileDialog(state: UiState, vm: ChatViewModel, onDismiss: () -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Чьи документы разбираем?") },
+        title = { Text("Семья") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 state.profiles.forEach { p ->
@@ -90,7 +91,7 @@ fun ProfileDialog(state: UiState, vm: ChatViewModel, onDismiss: () -> Unit) {
                     ) {
                         RadioButton(selected = p.id == state.profileId, onClick = { vm.selectProfile(p.id); onDismiss() })
                         Column(Modifier.weight(1f)) {
-                            Text("👤 " + p.name, style = MaterialTheme.typography.bodyLarge)
+                            Text(p.name, style = MaterialTheme.typography.titleSmall)
                             val extra = listOfNotNull(
                                 p.sex?.let { if (it == "ж") "жен." else "муж." },
                                 p.birthYear?.let { "$it г.р." },
@@ -171,7 +172,7 @@ fun ReminderDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("⏰ Напоминание") },
+        title = { Text("Напоминание") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
@@ -237,45 +238,71 @@ private fun outOfRange(v: Double, ref: Pair<Double?, Double?>) =
     (ref.first != null && v < ref.first!!) || (ref.second != null && v > ref.second!!)
 
 @Composable
-fun DynamicsScreen(state: UiState, vm: ChatViewModel) {
-    BackHandler { vm.show(Screen.CHAT) }
-    var showProfiles by remember { mutableStateOf(false) }
-    val groups = state.profileLabs.groupBy { it.name }.toList().sortedBy { it.first }
+fun LabsScreen(state: UiState, vm: ChatViewModel) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val all = state.profileLabs.groupBy { it.name }.toList().sortedBy { it.first }
+    val groups = all.filter { query.isBlank() || it.first.contains(query.trim(), ignoreCase = true) }
+    val a = LocalAccents.current
 
     Column(Modifier.fillMaxSize()) {
-        BrandHeader(
-            title = "Динамика анализов",
-            subtitle = "👤 ${state.profile.name} ▾",
-            onTitleClick = { showProfiles = true },
-            navigation = {
-                IconButton(onClick = { vm.show(Screen.CHAT) }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад", tint = Color.White)
-                }
-            },
-        )
-        if (groups.isEmpty()) {
-            Column(Modifier.padding(16.dp)) {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                    Text(
-                        "Пока нет показателей.\n\nПосле полного разбора (кнопка «Все файлы загружены») приложение само " +
-                            "сохранит сюда числа из анализов. Когда один и тот же анализ будет сдан несколько раз, " +
-                            "здесь появится график, как он меняется.",
-                        modifier = Modifier.padding(16.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
+        TabTitle("Анализы", subtitle = state.profile.name)
+        if (all.isEmpty()) {
+            Column(
+                Modifier.fillMaxSize().padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                IconTile(Icons.AutoMirrored.Outlined.ShowChart, a.good, a.goodBg, 64.dp)
+                Gap(16.dp)
+                Text("Здесь появится динамика", style = MaterialTheme.typography.titleLarge)
+                Gap(6.dp)
+                Text(
+                    "После разбора приложение само сохранит цифры из анализов. Когда сдадите анализ ещё раз, " +
+                        "здесь будет видно, как он изменился.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Gap(80.dp)
             }
         } else {
+            val outCount = all.count { (_, v) ->
+                val last = v.maxBy { it.date }
+                outOfRange(last.value, parseRef(v.lastOrNull { it.ref.isNotBlank() }?.ref.orEmpty()))
+            }
             LazyColumn(
                 Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(14.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StatTile("${all.size}", "показателей", a.blue, a.blueBg, Modifier.weight(1f))
+                        StatTile("$outCount", "вне нормы", if (outCount > 0) a.warn else a.good, if (outCount > 0) a.warnBg else a.goodBg, Modifier.weight(1f))
+                    }
+                }
+                if (all.size > 5) {
+                    item {
+                        OutlinedTextField(
+                            value = query, onValueChange = { query = it },
+                            placeholder = { Text("Найти показатель") },
+                            singleLine = true, modifier = Modifier.fillMaxWidth(),
+                            shape = MaterialTheme.shapes.medium, colors = fieldColors(),
+                        )
+                    }
+                }
                 items(groups, key = { it.first }) { (name, values) -> LabCard(name, values.sortedBy { it.date }, vm::deleteLab) }
             }
         }
     }
-    if (showProfiles) ProfileDialog(state, vm) { showProfiles = false }
+}
+
+@Composable
+private fun StatTile(value: String, label: String, tint: Color, bg: Color, modifier: Modifier) {
+    AppCard(modifier = modifier, color = bg, border = false, padding = 16.dp) {
+        Text(value, style = MaterialTheme.typography.headlineMedium, color = tint)
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }
 
 @Composable
@@ -284,12 +311,8 @@ private fun LabCard(name: String, values: List<LabResult>, onDelete: (LabResult)
     val last = values.last()
     val ref = parseRef(values.lastOrNull { it.ref.isNotBlank() }?.ref.orEmpty())
     val warn = MaterialTheme.colorScheme.error
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
-    ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    AppCard(onClick = { expanded = !expanded }, padding = 16.dp) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 Text(
@@ -322,7 +345,7 @@ private fun LabCard(name: String, values: List<LabResult>, onDelete: (LabResult)
                     }
                 }
             } else {
-                Text("Нажмите, чтобы увидеть все значения", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (values.size > 1) "Все значения ›" else "Подробнее ›", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             }
         }
     }
@@ -382,17 +405,11 @@ private fun LabChart(values: List<LabResult>, ref: Pair<Double?, Double?>) {
 fun RemindersCard(state: UiState, vm: ChatViewModel) {
     var adding by remember { mutableStateOf(false) }
     val f = SimpleDateFormat("d MMMM yyyy, HH:mm", Locale("ru"))
-    Card(
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("⏰ Напоминания", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+    AppCard {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (state.reminders.isEmpty()) {
                 Text(
-                    "Пока нет. Под ответом ИИ нажмите «⏰», чтобы не забыть пересдать анализ или сходить к врачу.",
+                    "Пока нет. Напоминание можно поставить из разбора, чтобы не забыть пересдать анализ или сходить к врачу.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

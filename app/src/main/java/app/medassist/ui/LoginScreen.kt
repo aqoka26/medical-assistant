@@ -53,7 +53,7 @@ fun LoginScreen(state: UiState, vm: ChatViewModel) {
     var localError by rememberSaveable { mutableStateOf<String?>(null) }
     val registering = tab == 1
 
-    Box(Modifier.fillMaxSize().background(BrandGradient)) {
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -61,27 +61,22 @@ fun LoginScreen(state: UiState, vm: ChatViewModel) {
                 .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            Spacer(Modifier.height(28.dp))
+            AppLogo(56.dp)
             Spacer(Modifier.height(24.dp))
-            AppLogo(76.dp)
-            Spacer(Modifier.height(12.dp))
-            Text("МедАнализ", style = MaterialTheme.typography.headlineMedium, color = Color.White)
+            Text(if (registering) "Создайте аккаунт" else "С возвращением", style = MaterialTheme.typography.headlineMedium)
+            Spacer(Modifier.height(6.dp))
             Text(
-                if (registering) "Создайте аккаунт" else "Войдите в аккаунт",
+                if (registering) "Это займёт минуту. Почта и телефон не нужны." else "Войдите, чтобы продолжить",
                 style = MaterialTheme.typography.bodyLarge,
-                color = Color.White.copy(alpha = 0.9f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(24.dp))
 
-            Card(
-                shape = MaterialTheme.shapes.large,
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
+            AppCard(padding = 0.dp) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TabRow(selectedTabIndex = tab, containerColor = Color.Transparent) {
+                    TabRow(selectedTabIndex = tab, containerColor = Color.Transparent, divider = {}) {
                         Tab(selected = tab == 0, onClick = { tab = 0; localError = null }, text = { Text("Вход") })
                         Tab(selected = tab == 1, onClick = { tab = 1; localError = null }, text = { Text("Регистрация") })
                     }
@@ -93,6 +88,8 @@ fun LoginScreen(state: UiState, vm: ChatViewModel) {
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                         modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.medium,
+                        colors = fieldColors(),
                     )
                     OutlinedTextField(
                         value = password,
@@ -108,6 +105,8 @@ fun LoginScreen(state: UiState, vm: ChatViewModel) {
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.medium,
+                        colors = fieldColors(),
                     )
                     if (registering) {
                         OutlinedTextField(
@@ -118,13 +117,8 @@ fun LoginScreen(state: UiState, vm: ChatViewModel) {
                             visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             modifier = Modifier.fillMaxWidth(),
-                        )
-                        OutlinedTextField(
-                            value = invite,
-                            onValueChange = { invite = it },
-                            label = { Text("Код приглашения (если дали)") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
+                            shape = MaterialTheme.shapes.medium,
+                            colors = fieldColors(),
                         )
                     }
                     localError?.let {
@@ -139,12 +133,12 @@ fun LoginScreen(state: UiState, vm: ChatViewModel) {
                                 else -> null
                             }
                             if (localError == null) {
-                                if (registering) vm.register(login, password, invite) else vm.login(login, password)
+                                if (registering) vm.register(login, password, "") else vm.login(login, password)
                             }
                         },
                         enabled = !state.authBusy,
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
-                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier.fillMaxWidth().height(54.dp),
+                        shape = MaterialTheme.shapes.medium,
                     ) {
                         if (state.authBusy) {
                             CircularProgressIndicator(Modifier.size(22.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
@@ -155,15 +149,13 @@ fun LoginScreen(state: UiState, vm: ChatViewModel) {
                 }
             }
             Spacer(Modifier.height(16.dp))
-            Row {
-                Text(
-                    "Аккаунт нужен, чтобы у каждого был свой дневной лимит сообщений. " +
-                        "Ваши разборы и файлы хранятся на телефоне.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.85f),
-                    textAlign = TextAlign.Center,
-                )
-            }
+            Text(
+                "Ваши разборы и документы хранятся только на этом телефоне.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }

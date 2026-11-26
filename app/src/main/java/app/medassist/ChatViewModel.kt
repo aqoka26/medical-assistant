@@ -27,10 +27,14 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
-enum class Screen { LOGIN, CHAT, HISTORY, SETTINGS, DYNAMICS }
+enum class Screen {
+    LOGIN, HOME, RECORDS, LABS, PROFILE, NEW, REPORT;
+
+    val isTab: Boolean get() = this == HOME || this == RECORDS || this == LABS || this == PROFILE
+}
 
 data class UiState(
-    val screen: Screen = Screen.CHAT,
+    val screen: Screen = Screen.HOME,
     val conversations: List<Conversation> = emptyList(),
     val current: Conversation? = null,
     val pending: List<Attachment> = emptyList(),
@@ -63,11 +67,14 @@ data class UiState(
     val profileLabs: List<LabResult> get() = labs.filter { it.profileId == profileId }
 }
 
+const val ALL_FILES_MARKER = "ВСЕ ФАЙЛЫ ЗАГРУЖЕНЫ"
+
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val store = Store(app)
     private val importer = FileImporter(app, store)
     private val systemPrompt: String by lazy {
-        app.assets.open("system_prompt.md").bufferedReader().use { it.readText() }
+        val read = { name: String -> app.assets.open(name).bufferedReader().use { it.readText() } }
+        read("system_prompt.md") + "\n\n" + read("app_rules.md")
     }
 
     private val usesProxy = BuildConfig.PROXY_URL.isNotBlank()
@@ -110,15 +117,23 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             locked = store.lockEnabled,
             screen = when {
                 needsLogin() -> Screen.LOGIN
-                !usesProxy && store.apiKey.isBlank() && store.disclaimerAccepted -> Screen.SETTINGS
-                else -> Screen.CHAT
+                !usesProxy && store.apiKey.isBlank() && store.disclaimerAccepted -> Screen.PROFILE
+                else -> Screen.HOME
             },
         )
     }
 
+    /** Design screenshots in CI: fills the screen with sample data, saves nothing. */
+    fun demo(name: String) {
+        if (!BuildConfig.DEMO) return
+        if (name == "welcome") { _state.update { it.copy(disclaimerAccepted = false) }; return }
+        val screen = runCatching { Screen.valueOf(name.uppercase()) }.getOrDefault(Screen.HOME)
+        _state.value = DemoData.state(_state.value, screen)
+    }
+
     fun show(screen: Screen) {
         _state.update { it.copy(screen = screen) }
-        if (screen == Screen.SETTINGS) refreshUsage()
+        if (screen == Screen.PROFILE || screen == Screen.HOME) refreshUsage()
     }
 
     // ---------- accounts ----------
@@ -138,7 +153,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 store.accountsOff = false
                 _state.update {
                     it.copy(
-                        authBusy = false, login = account.login, screen = Screen.CHAT,
+                        authBusy = false, login = account.login, screen = Screen.HOME,
                         usage = Usage(account.login, account.usedToday, account.dailyLimit),
                         notice = "Вы вошли как ${account.login}",
                     )
@@ -148,7 +163,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 if ("не включены" in msg) {
                     // The server has no accounts yet: work without login.
                     store.accountsOff = true
-                    _state.update { it.copy(authBusy = false, screen = Screen.CHAT) }
+                    _state.update { it.copy(authBusy = false, screen = Screen.HOME) }
                 } else {
                     _state.update { it.copy(authBusy = false, notice = msg) }
                 }
@@ -196,7 +211,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun receiveShared(uris: List<Uri>, text: String?) {
         if (uris.isNotEmpty()) addFiles(uris)
         if (!text.isNullOrBlank()) _state.update { it.copy(draft = text) }
-        _state.update { if (it.screen == Screen.LOGIN) it else it.copy(screen = Screen.CHAT) }
+        _state.update { if (it.screen == Screen.LOGIN) it else it.copy(screen = Screen.NEW, current = null) }
     }
 
     // ---------- family profiles ----------
@@ -205,7 +220,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (_state.value.sending) return
         store.currentProfileId = id
         store.currentConversationId = null
-        _state.update { it.copy(profileId = id, current = null, pending = emptyList(), screen = if (it.screen == Screen.HISTORY || it.screen == Screen.DYNAMICS) it.screen else Screen.CHAT) }
+        _state.update { it.copy(profileId = id, current = null, pending = emptyList(), screen = if (it.screen == Screen.REPORT) Screen.HOME else it.screen) }
     }
 
     fun addProfile(name: String, birthYear: Int?, sex: String?) {
@@ -265,7 +280,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 disclaimerAccepted = true,
                 screen = when {
                     needsLogin() -> Screen.LOGIN
-                    !it.ready -> Screen.SETTINGS
+                    !it.ready -> Screen.PROFILE
                     else -> it.screen
                 },
             )
@@ -282,7 +297,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 store.apiKey = k
                 store.model = m
                 _state.update {
-                    it.copy(apiKey = k, model = m, checkingKey = false, screen = Screen.CHAT, notice = if (usesProxy) "Сохранено" else "Ключ работает и сохранён")
+                    it.copy(apiKey = k, model = m, checkingKey = false, notice = if (usesProxy) "Сохранено" else "Ключ работает и сохранён")
                 }
             } else {
                 _state.update { it.copy(checkingKey = false, notice = error.message ?: "Ключ не подошёл") }
@@ -293,13 +308,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun newConversation() {
         if (_state.value.sending) return
         store.currentConversationId = null
-        _state.update { it.copy(current = null, pending = emptyList(), screen = Screen.CHAT, status = null) }
+        _state.update { it.copy(current = null, pending = emptyList(), screen = Screen.NEW, status = null) }
     }
 
     fun open(conversation: Conversation) {
         if (_state.value.sending) return
         store.currentConversationId = conversation.id
-        _state.update { it.copy(current = conversation, pending = emptyList(), screen = Screen.CHAT) }
+        _state.update { it.copy(current = conversation, pending = emptyList(), screen = Screen.REPORT) }
     }
 
     fun delete(conversation: Conversation) {
@@ -310,6 +325,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             s.copy(
                 conversations = s.conversations.filterNot { it.id == conversation.id },
                 current = if (s.current?.id == conversation.id) null else s.current,
+                screen = if (s.current?.id == conversation.id && s.screen == Screen.REPORT) Screen.RECORDS else s.screen,
             )
         }
     }
@@ -341,7 +357,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (s.sending) return
         if (text.isBlank() && s.pending.isEmpty()) return
         if (!s.ready) {
-            _state.update { it.copy(screen = Screen.SETTINGS, notice = "Сначала введите ключ API") }
+            _state.update { it.copy(screen = Screen.PROFILE, notice = "Сначала введите ключ API") }
             return
         }
         val now = System.currentTimeMillis()
@@ -357,6 +373,22 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         persist(conversation)
         _state.update { it.copy(pending = emptyList()) }
         runReply(conversation)
+    }
+
+    /** Starts a new analysis with all attached documents and the answers from the form. */
+    fun startAnalysis(complaints: String, medicines: String, question: String) {
+        val s = _state.value
+        if (s.sending || s.pending.isEmpty()) return
+        val text = buildString {
+            appendLine("Новый разбор. Все документы приложены к этому сообщению.")
+            if (complaints.isNotBlank()) appendLine("Жалобы и самочувствие: ${complaints.trim()}")
+            if (medicines.isNotBlank()) appendLine("Лекарства и добавки: ${medicines.trim()}")
+            if (question.isNotBlank()) appendLine("Что хочу узнать: ${question.trim()}")
+            append(ALL_FILES_MARKER)
+        }
+        _state.update { it.copy(current = null) }
+        send(text)
+        _state.update { it.copy(screen = Screen.REPORT) }
     }
 
     /** Sends the conversation again after an error (error notes are never sent to the model). */
@@ -412,6 +444,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 if (found.isNotEmpty()) {
                     store.labs = Labs.merge(store.labs, found)
                     _state.update { it.copy(labs = store.labs, notice = "Показатели добавлены в «Динамику»: ${found.size}") }
+                }
+                if (conversation.messages.none { it.role == Role.ASSISTANT && !it.isError }) {
+                    app.medassist.core.Report.parse(result.text).title?.let { t ->
+                        conversation = conversation.copy(title = t.take(60))
+                    }
                 }
                 if (result.text.isNotBlank()) {
                     conversation = conversation.copy(
