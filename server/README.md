@@ -19,6 +19,19 @@
 5. Скопируйте адрес воркера, он выглядит так: `https://medanaliz-proxy.ВАШЕ-ИМЯ.workers.dev`.
    Откройте его в браузере: должно появиться `MedAnaliz proxy is running`.
 
+## Аккаунты и личный дневной лимит
+
+1. **Storage & Databases** → **D1** → **Create database**, имя `medanaliz-db` (можно пропустить, если база уже есть).
+2. Воркер → **Settings** → **Bindings** → **Add binding** → **D1 database**:
+   Variable name `DB`, база `medanaliz-db` → **Deploy**.
+3. Необязательно, в **Variables and Secrets**:
+   - `DAILY_LIMIT` — сколько сообщений в день у каждого (по умолчанию 30);
+   - `INVITE_CODE` — если задать, регистрироваться смогут только те, кому вы дали этот код.
+
+После этого адрес воркера показывает `MedAnaliz proxy is running (accounts on)`.
+Заблокировать человека: в D1 выполните `UPDATE users SET blocked = 1 WHERE login = 'логин';`.
+Дать кому-то свой лимит: `UPDATE users SET daily_limit = 100 WHERE login = 'логин';`.
+
 ## Подключить сервер к сборке APK
 
 В репозитории на GitHub: **Settings** → **Secrets and variables** → **Actions**.
