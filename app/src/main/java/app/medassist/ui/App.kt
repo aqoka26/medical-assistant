@@ -63,6 +63,7 @@ fun App(vm: ChatViewModel, onUnlock: () -> Unit, canUseLock: () -> Boolean) {
                         Screen.CHAT -> ChatScreen(state, vm)
                         Screen.HISTORY -> HistoryScreen(state, vm)
                         Screen.SETTINGS -> SettingsScreen(state, vm, canUseLock)
+                        Screen.DYNAMICS -> DynamicsScreen(state, vm)
                         Screen.LOGIN -> Unit
                     }
                 }

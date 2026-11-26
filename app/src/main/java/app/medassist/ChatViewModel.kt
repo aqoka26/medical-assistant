@@ -12,6 +12,10 @@ import app.medassist.core.ChatException
 import app.medassist.core.GeminiChat
 import app.medassist.core.Conversation
 import app.medassist.core.Role
+import app.medassist.core.LabResult
+import app.medassist.core.Labs
+import app.medassist.core.Profile
+import app.medassist.core.Reminder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,7 +27,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
-enum class Screen { LOGIN, CHAT, HISTORY, SETTINGS }
+enum class Screen { LOGIN, CHAT, HISTORY, SETTINGS, DYNAMICS }
 
 data class UiState(
     val screen: Screen = Screen.CHAT,
@@ -48,8 +52,15 @@ data class UiState(
     val locked: Boolean = false,
     /** Text shared into the app from another app, to put into the input box. */
     val draft: String? = null,
+    val profiles: List<Profile> = listOf(Profile.DEFAULT),
+    val profileId: String = Profile.ME,
+    val labs: List<LabResult> = emptyList(),
+    val reminders: List<Reminder> = emptyList(),
 ) {
     val ready: Boolean get() = usesProxy || apiKey.isNotBlank()
+    val profile: Profile get() = profiles.firstOrNull { it.id == profileId } ?: Profile.DEFAULT
+    val profileConversations: List<Conversation> get() = conversations.filter { it.profileId == profileId }
+    val profileLabs: List<LabResult> get() = labs.filter { it.profileId == profileId }
 }
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
@@ -80,8 +91,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         val all = store.loadAll()
-        val current = all.firstOrNull { it.id == store.currentConversationId }
+        val profiles = store.profiles
+        val profileId = store.currentProfileId.takeIf { id -> profiles.any { it.id == id } } ?: Profile.ME
+        val current = all.firstOrNull { it.id == store.currentConversationId && it.profileId == profileId }
         _state.value = UiState(
+            profiles = profiles,
+            profileId = profileId,
+            labs = store.labs,
+            reminders = store.reminders.filter { it.at > System.currentTimeMillis() },
             conversations = all,
             current = current,
             apiKey = store.apiKey,
@@ -182,6 +199,61 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { if (it.screen == Screen.LOGIN) it else it.copy(screen = Screen.CHAT) }
     }
 
+    // ---------- family profiles ----------
+
+    fun selectProfile(id: String) {
+        if (_state.value.sending) return
+        store.currentProfileId = id
+        store.currentConversationId = null
+        _state.update { it.copy(profileId = id, current = null, pending = emptyList(), screen = if (it.screen == Screen.HISTORY || it.screen == Screen.DYNAMICS) it.screen else Screen.CHAT) }
+    }
+
+    fun addProfile(name: String, birthYear: Int?, sex: String?) {
+        val p = Profile(UUID.randomUUID().toString(), name.trim(), birthYear, sex)
+        store.profiles = _state.value.profiles + p
+        _state.update { it.copy(profiles = store.profiles) }
+        selectProfile(p.id)
+    }
+
+    fun updateProfile(p: Profile) {
+        store.profiles = _state.value.profiles.map { if (it.id == p.id) p else it }
+        _state.update { it.copy(profiles = store.profiles) }
+    }
+
+    /** Removes a family member; their analyses and lab values move to «Я», nothing is lost. */
+    fun deleteProfile(id: String) {
+        if (id == Profile.ME || _state.value.sending) return
+        viewModelScope.launch(Dispatchers.IO) {
+            _state.value.conversations.filter { it.profileId == id }.forEach { store.save(it.copy(profileId = Profile.ME)) }
+            store.labs = _state.value.labs.map { if (it.profileId == id) it.copy(profileId = Profile.ME) else it }
+            store.profiles = _state.value.profiles.filterNot { it.id == id }
+            _state.update { it.copy(profiles = store.profiles, conversations = store.loadAll(), labs = store.labs) }
+            if (_state.value.profileId == id) selectProfile(Profile.ME)
+        }
+    }
+
+    // ---------- lab dynamics ----------
+
+    fun deleteLab(lab: LabResult) {
+        store.labs = _state.value.labs - lab
+        _state.update { it.copy(labs = store.labs) }
+    }
+
+    // ---------- reminders ----------
+
+    fun addReminder(text: String, at: Long) {
+        val r = Reminder((System.currentTimeMillis() % Int.MAX_VALUE).toInt(), text.trim(), at)
+        store.reminders = store.reminders + r
+        Reminders.schedule(getApplication<Application>(), r)
+        _state.update { it.copy(reminders = (it.reminders + r).sortedBy { x -> x.at }, notice = "Напоминание сохранено") }
+    }
+
+    fun deleteReminder(r: Reminder) {
+        Reminders.cancel(getApplication<Application>(), r)
+        store.reminders = store.reminders.filterNot { it.id == r.id }
+        _state.update { it.copy(reminders = it.reminders.filterNot { x -> x.id == r.id }) }
+    }
+
     fun clearDraft() = _state.update { it.copy(draft = null) }
 
     fun clearNotice() = _state.update { it.copy(notice = null) }
@@ -277,6 +349,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             id = UUID.randomUUID().toString(),
             title = "Разбор от " + SimpleDateFormat("dd.MM.yyyy HH:mm", Locale("ru")).format(Date(now)),
             createdAt = now,
+            profileId = s.profileId,
         )
         val conversation = base.copy(
             messages = base.messages + ChatMessage(Role.USER, text.trim(), s.pending, now)
@@ -296,6 +369,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private fun runReply(start: Conversation) {
         val key = _state.value.apiKey
         val model = _state.value.model
+        val profile = _state.value.profiles.firstOrNull { it.id == start.profileId } ?: Profile.DEFAULT
+        val prompt = buildString {
+            append(systemPrompt)
+            append("\n\n").append(Labs.INSTRUCTION)
+            if (profile.id != Profile.ME || profile.birthYear != null || profile.sex != null) {
+                append("\n\n## ПАЦИЕНТ\n\nДокументы относятся к: ").append(profile.describe()).append('.')
+            }
+        }
         _state.update { it.copy(sending = true, streamingText = null, status = "Отправка…") }
         viewModelScope.launch(Dispatchers.IO) {
             var conversation = start
@@ -306,7 +387,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val onText: (String) -> Unit = { partial -> _state.update { it.copy(streamingText = partial, status = null) } }
                 val ask: (String) -> app.medassist.core.ReplyResult = { m ->
                     _state.update { it.copy(status = "Gemini изучает данные…") }
-                    chat.reply(m, systemPrompt, conversation.messages, onText)
+                    chat.reply(m, prompt, conversation.messages, onText)
                 }
                 val result = try {
                     ask(model)
@@ -327,6 +408,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 val now = System.currentTimeMillis()
+                val found = Labs.extract(result.text, conversation.profileId)
+                if (found.isNotEmpty()) {
+                    store.labs = Labs.merge(store.labs, found)
+                    _state.update { it.copy(labs = store.labs, notice = "Показатели добавлены в «Динамику»: ${found.size}") }
+                }
                 if (result.text.isNotBlank()) {
                     conversation = conversation.copy(
                         messages = conversation.messages + ChatMessage(Role.ASSISTANT, result.text, timestamp = now)

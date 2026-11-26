@@ -92,6 +92,8 @@ fun SettingsScreen(state: UiState, vm: ChatViewModel, canUseLock: () -> Boolean)
                 }
             }
 
+            RemindersCard(state, vm)
+
             SettingsCard("🔒 Защита") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {

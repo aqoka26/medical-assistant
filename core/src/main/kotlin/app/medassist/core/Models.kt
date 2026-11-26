@@ -35,6 +35,7 @@ data class Conversation(
     val title: String,
     val createdAt: Long,
     val messages: List<ChatMessage> = emptyList(),
+    val profileId: String = Profile.ME,
 )
 
 object SupportedFiles {
@@ -44,3 +45,43 @@ object SupportedFiles {
 
     fun isSupported(mime: String): Boolean = mime == PDF || mime in IMAGES || mime in TEXT
 }
+
+/** A family member whose documents are analysed separately. */
+@Serializable
+data class Profile(
+    val id: String,
+    val name: String,
+    val birthYear: Int? = null,
+    /** "м" or "ж", or null when not given. */
+    val sex: String? = null,
+) {
+    fun describe(): String = buildString {
+        append(name)
+        sex?.let { append(", пол: ").append(if (it == "ж") "женский" else "мужской") }
+        birthYear?.let { append(", год рождения: ").append(it) }
+    }
+
+    companion object {
+        const val ME = "me"
+        val DEFAULT = Profile(ME, "Я")
+    }
+}
+
+/** One lab value taken from an answer, for the dynamics charts. */
+@Serializable
+data class LabResult(
+    val name: String,
+    val value: Double,
+    val unit: String = "",
+    /** Date the sample was taken, YYYY-MM-DD. */
+    val date: String,
+    val ref: String = "",
+    val profileId: String = Profile.ME,
+)
+
+@Serializable
+data class Reminder(
+    val id: Int,
+    val text: String,
+    val at: Long,
+)

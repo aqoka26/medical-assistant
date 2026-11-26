@@ -2,7 +2,10 @@ package app.medassist.ui
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
+import android.speech.RecognizerIntent
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -70,6 +73,8 @@ import app.medassist.UiState
 import app.medassist.core.Attachment
 import app.medassist.core.ChatMessage
 import app.medassist.core.Role
+import app.medassist.core.Labs
+import app.medassist.PdfReport
 import com.mikepenz.markdown.m3.Markdown
 import java.io.File
 import java.text.SimpleDateFormat
@@ -81,7 +86,24 @@ fun ChatScreen(state: UiState, vm: ChatViewModel) {
     val context = LocalContext.current
     var input by rememberSaveable { mutableStateOf("") }
     var cameraUri by rememberSaveable { mutableStateOf<String?>(null) }
+    var showProfiles by rememberSaveable { mutableStateOf(false) }
+    var remindFor by rememberSaveable { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        val heard = r.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        if (!heard.isNullOrBlank()) input = if (input.isBlank()) heard else "$input $heard"
+    }
+    val startVoice = {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Говорите…")
+        try {
+            voice.launch(intent)
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(context, "На телефоне нет голосового ввода Google", Toast.LENGTH_LONG).show()
+        }
+    }
     val messages = state.current?.messages.orEmpty()
 
     // Text shared into the app from another app lands in the input box.
@@ -115,9 +137,13 @@ fun ChatScreen(state: UiState, vm: ChatViewModel) {
 
     Column(Modifier.fillMaxSize()) {
         BrandHeader(
-            title = "МедАнализ",
+            title = "👤 ${state.profile.name} ▾",
             subtitle = state.current?.title ?: "Новый разбор",
+            onTitleClick = { if (!state.sending) showProfiles = true },
             actions = {
+                IconButton(onClick = { vm.show(Screen.DYNAMICS) }) {
+                    Text("📈", style = MaterialTheme.typography.titleLarge)
+                }
                 IconButton(onClick = vm::newConversation, enabled = !state.sending) {
                     Icon(Icons.Filled.Add, contentDescription = "Новый разбор", tint = Color.White)
                 }
@@ -143,7 +169,16 @@ fun ChatScreen(state: UiState, vm: ChatViewModel) {
                     items(messages.size) { index ->
                         val msg = messages[index]
                         val isLast = index == messages.lastIndex
-                        MessageBubble(msg, onRetry = if (msg.isError && isLast && !state.sending) vm::retry else null)
+                        MessageBubble(
+                            msg,
+                            onRetry = if (msg.isError && isLast && !state.sending) vm::retry else null,
+                            onPdf = { text ->
+                                runCatching {
+                                    PdfReport.share(context, text, state.current?.title ?: "Разбор", state.profile.name.takeIf { state.profiles.size > 1 })
+                                }.onFailure { Toast.makeText(context, "Не удалось создать PDF: ${it.message}", Toast.LENGTH_LONG).show() }
+                            },
+                            onRemind = { remindFor = true },
+                        )
                     }
                     if (state.sending) {
                         item { AnswerInProgress(state.streamingText, state.status) }
@@ -160,12 +195,15 @@ fun ChatScreen(state: UiState, vm: ChatViewModel) {
             onCamera = openCamera,
             onRemove = vm::removePending,
             onAllUploaded = { vm.send(ALL_FILES_UPLOADED) },
+            onVoice = startVoice,
             onSend = {
                 vm.send(input)
                 input = ""
             },
         )
     }
+    if (showProfiles) ProfileDialog(state, vm) { showProfiles = false }
+    if (remindFor) ReminderDialog(vm) { remindFor = false }
 }
 
 @Composable
@@ -224,11 +262,11 @@ private fun EmptyChat(onAttach: () -> Unit, onCamera: () -> Unit) {
 private val timeFormat = SimpleDateFormat("HH:mm", Locale("ru"))
 
 @Composable
-private fun MessageBubble(msg: ChatMessage, onRetry: (() -> Unit)?) {
+private fun MessageBubble(msg: ChatMessage, onRetry: (() -> Unit)?, onPdf: (String) -> Unit, onRemind: () -> Unit) {
     when {
         msg.isError -> ErrorBubble(msg.text, onRetry)
         msg.role == Role.USER -> UserBubble(msg)
-        else -> AssistantBubble(msg.text, timeFormat.format(Date(msg.timestamp)))
+        else -> AssistantBubble(Labs.visible(msg.text), timeFormat.format(Date(msg.timestamp)), onPdf, onRemind)
     }
 }
 
@@ -287,14 +325,20 @@ private fun AssistantShell(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun AssistantBubble(text: String, time: String) {
+private fun AssistantBubble(text: String, time: String, onPdf: (String) -> Unit, onRemind: () -> Unit) {
     val context = LocalContext.current
+    // Long answers are full analyses: offer PDF and reminders for them.
+    val full = text.length > 1500
     AssistantShell {
         SelectionContainer { Markdown(content = text) }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { copyToClipboard(context, text) }) { Text("Копировать") }
+            if (full) {
+                TextButton(onClick = onRemind, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("⏰") }
+                TextButton(onClick = { onPdf(text) }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("PDF") }
+            }
+            TextButton(onClick = { copyToClipboard(context, text) }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Копировать") }
         }
     }
 }
@@ -303,7 +347,7 @@ private fun AssistantBubble(text: String, time: String) {
 private fun AnswerInProgress(text: String?, status: String?) {
     AssistantShell {
         if (!text.isNullOrEmpty()) {
-            Text(text, style = MaterialTheme.typography.bodyLarge)
+            Text(Labs.visible(text), style = MaterialTheme.typography.bodyLarge)
             Spacer(Modifier.height(8.dp))
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -342,6 +386,7 @@ private fun InputBar(
     onCamera: () -> Unit,
     onRemove: (Attachment) -> Unit,
     onAllUploaded: () -> Unit,
+    onVoice: () -> Unit,
     onSend: () -> Unit,
 ) {
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
@@ -410,6 +455,11 @@ private fun InputBar(
                     onValueChange = onInput,
                     modifier = Modifier.weight(1f),
                     placeholder = { Text("Сообщение или пояснение") },
+                    trailingIcon = {
+                        IconButton(onClick = onVoice, enabled = !state.sending) {
+                            Text("🎤", style = MaterialTheme.typography.titleMedium)
+                        }
+                    },
                     maxLines = 6,
                     shape = RoundedCornerShape(24.dp),
                     colors = OutlinedTextFieldDefaults.colors(

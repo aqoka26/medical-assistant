@@ -56,7 +56,7 @@ fun HistoryScreen(state: UiState, vm: ChatViewModel) {
     Column(Modifier.fillMaxSize()) {
         BrandHeader(
             title = "История разборов",
-            subtitle = "Всего: ${state.conversations.size}",
+            subtitle = "${state.profile.name} · всего: ${state.profileConversations.size}",
             navigation = {
                 IconButton(onClick = { vm.show(Screen.CHAT) }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад", tint = Color.White)
@@ -68,7 +68,7 @@ fun HistoryScreen(state: UiState, vm: ChatViewModel) {
                 }
             },
         )
-        if (state.conversations.isEmpty()) {
+        if (state.profileConversations.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("🗂", style = MaterialTheme.typography.displaySmall)
@@ -85,7 +85,7 @@ fun HistoryScreen(state: UiState, vm: ChatViewModel) {
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(state.conversations, key = { it.id }) { c ->
+                items(state.profileConversations, key = { it.id }) { c ->
                     val isCurrent = c.id == state.current?.id
                     val files = c.messages.sumOf { it.attachments.size }
                     val answers = c.messages.count { it.role == Role.ASSISTANT && !it.isError }
