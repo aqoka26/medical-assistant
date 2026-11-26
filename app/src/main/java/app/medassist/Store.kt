@@ -17,7 +17,12 @@ class Store(context: Context) {
         set(value) = prefs.edit().putString("api_key", value.trim()).apply()
 
     var model: String
-        get() = prefs.getString("model", null) ?: app.medassist.core.GeminiChat.DEFAULT_MODEL
+        get() = when (val saved = prefs.getString("model", null)) {
+            // Names used by older versions of the app that Google does not serve.
+            null, "", "gemini-3.8-flash" -> app.medassist.core.GeminiChat.DEFAULT_MODEL
+            "gemini-3.5-flash-lite" -> app.medassist.core.GeminiChat.LITE_MODEL
+            else -> saved
+        }
         set(value) = prefs.edit().putString("model", value.trim()).apply()
 
     var disclaimerAccepted: Boolean

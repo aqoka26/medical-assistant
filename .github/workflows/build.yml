@@ -32,6 +32,11 @@ jobs:
             echo "HTTP $code"; head -c 300 models.json; echo
             grep -o '"name": *"models/gemini-[^"]*"' models.json | head -20 || true
             test "$code" = "200"
+            # One tiny real request through the proxy (uses 1 of the free daily requests of the lite model).
+            curl -sS -m 60 -o reply.txt -w 'generate HTTP %{http_code}\n' -H 'content-type: application/json' \
+              -d '{"contents":[{"role":"user","parts":[{"text":"Ответь одним словом: работает?"}]}],"generationConfig":{"maxOutputTokens":200}}' \
+              "$URL/v1beta/models/gemini-flash-lite-latest:streamGenerateContent?alt=sse"
+            head -c 600 reply.txt; echo
           fi
 
       - name: Test and build

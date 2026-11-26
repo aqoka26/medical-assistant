@@ -188,8 +188,8 @@ class GeminiChat(
 
     companion object {
         const val BASE = "https://generativelanguage.googleapis.com"
-        const val DEFAULT_MODEL = "gemini-3.8-flash"
-        const val LITE_MODEL = "gemini-3.5-flash-lite"
+        const val DEFAULT_MODEL = "gemini-flash-latest"
+        const val LITE_MODEL = "gemini-flash-lite-latest"
 
         /** Gemini Files API keeps files for 48 hours; refresh a bit earlier. */
         const val FILE_LIFETIME_MS = 46L * 60 * 60 * 1000

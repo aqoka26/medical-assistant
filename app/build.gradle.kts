@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -8,7 +10,7 @@ plugins {
 val buildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
 
 // Proxy address: from the PROXY_URL build variable, or else from app/proxy.properties.
-val proxyProps = java.util.Properties().apply {
+val proxyProps = Properties().apply {
     val f = file("proxy.properties")
     if (f.exists()) f.inputStream().use { load(it) }
 }
