@@ -359,7 +359,13 @@ private fun LabChart(values: List<LabResult>, ref: Pair<Double?, Double?>) {
     val label = MaterialTheme.colorScheme.onSurfaceVariant
     val labelArgb = label.toArgb()
     Canvas(Modifier.fillMaxWidth().height(150.dp).padding(top = 6.dp)) {
-        val nums = values.map { it.value } + listOfNotNull(ref.first, ref.second)
+        // Fit the chart to the values; show the normal range only where it is near them.
+        val vs = values.map { it.value }
+        val span = maxOf(vs.max() - vs.min(), kotlin.math.abs(vs.max()) * 0.2, 1e-6)
+        val nums = vs + listOfNotNull(
+            ref.first?.takeIf { it >= vs.min() - span },
+            ref.second?.takeIf { it <= vs.max() + span },
+        )
         var lo = nums.min()
         var hi = nums.max()
         if (hi - lo < 1e-9) { lo -= 1; hi += 1 }
@@ -373,8 +379,8 @@ private fun LabChart(values: List<LabResult>, ref: Pair<Double?, Double?>) {
         fun x(i: Int) = left + (right - left) * i / (values.size - 1).coerceAtLeast(1)
 
         if (ref.first != null || ref.second != null) {
-            val yTop = y(ref.second ?: hi)
-            val yBottom = y(ref.first ?: lo)
+            val yTop = y(ref.second ?: hi).coerceIn(top - 18f, bottom + 22f)
+            val yBottom = y(ref.first ?: lo).coerceIn(top - 18f, bottom + 22f)
             drawRect(band, topLeft = Offset(left, yTop), size = Size(right - left, yBottom - yTop))
         }
         val path = Path()
