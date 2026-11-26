@@ -17,6 +17,10 @@ android {
         targetSdk = 35
         versionCode = buildNumber
         versionName = "1.0.$buildNumber"
+        // Address of your Cloudflare proxy and its app token, passed in by the GitHub build.
+        // When PROXY_URL is empty the app falls back to asking each user for their own key.
+        buildConfigField("String", "PROXY_URL", "\"${System.getenv("PROXY_URL").orEmpty().trimEnd('/')}\"")
+        buildConfigField("String", "APP_TOKEN", "\"${System.getenv("APP_TOKEN").orEmpty()}\"")
     }
 
     signingConfigs {
@@ -46,6 +50,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

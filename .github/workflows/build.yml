@@ -23,6 +23,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Test and build
+        env:
+          # Set in GitHub: Settings > Secrets and variables > Actions.
+          PROXY_URL: ${{ vars.PROXY_URL }}
+          APP_TOKEN: ${{ secrets.APP_TOKEN }}
         run: ./gradlew :core:test :app:assembleRelease --stacktrace
 
       - name: Rename APK

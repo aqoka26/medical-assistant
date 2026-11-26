@@ -36,7 +36,11 @@ data class UiState(
     val model: String = GeminiChat.DEFAULT_MODEL,
     val disclaimerAccepted: Boolean = false,
     val checkingKey: Boolean = false,
-)
+    /** True when the app talks to the owner's proxy and nobody needs a key. */
+    val usesProxy: Boolean = false,
+) {
+    val ready: Boolean get() = usesProxy || apiKey.isNotBlank()
+}
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val store = Store(app)
@@ -44,6 +48,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val systemPrompt: String by lazy {
         app.assets.open("system_prompt.md").bufferedReader().use { it.readText() }
     }
+
+    private val usesProxy = BuildConfig.PROXY_URL.isNotBlank()
+
+    private fun client(key: String = _state.value.apiKey): GeminiChat =
+        if (usesProxy) GeminiChat(apiKey = null, baseUrl = BuildConfig.PROXY_URL, appToken = BuildConfig.APP_TOKEN)
+        else GeminiChat(key)
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -57,7 +67,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             apiKey = store.apiKey,
             model = store.model,
             disclaimerAccepted = store.disclaimerAccepted,
-            screen = if (store.apiKey.isBlank() && store.disclaimerAccepted) Screen.SETTINGS else Screen.CHAT,
+            usesProxy = usesProxy,
+            screen = if (!usesProxy && store.apiKey.isBlank() && store.disclaimerAccepted) Screen.SETTINGS else Screen.CHAT,
         )
     }
 
@@ -68,7 +79,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun acceptDisclaimer() {
         store.disclaimerAccepted = true
         _state.update {
-            it.copy(disclaimerAccepted = true, screen = if (it.apiKey.isBlank()) Screen.SETTINGS else it.screen)
+            it.copy(disclaimerAccepted = true, screen = if (!it.ready) Screen.SETTINGS else it.screen)
         }
     }
 
@@ -77,12 +88,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val m = model.trim().ifBlank { GeminiChat.DEFAULT_MODEL }
         _state.update { it.copy(checkingKey = true) }
         viewModelScope.launch(Dispatchers.IO) {
-            val error = runCatching { GeminiChat(k).checkKey() }.exceptionOrNull()
+            val error = runCatching { client(k).checkKey() }.exceptionOrNull()
             if (error == null) {
                 store.apiKey = k
                 store.model = m
                 _state.update {
-                    it.copy(apiKey = k, model = m, checkingKey = false, screen = Screen.CHAT, notice = "Ключ работает и сохранён")
+                    it.copy(apiKey = k, model = m, checkingKey = false, screen = Screen.CHAT, notice = if (usesProxy) "Сохранено" else "Ключ работает и сохранён")
                 }
             } else {
                 _state.update { it.copy(checkingKey = false, notice = error.message ?: "Ключ не подошёл") }
@@ -140,7 +151,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val s = _state.value
         if (s.sending) return
         if (text.isBlank() && s.pending.isEmpty()) return
-        if (s.apiKey.isBlank()) {
+        if (!s.ready) {
             _state.update { it.copy(screen = Screen.SETTINGS, notice = "Сначала введите ключ API") }
             return
         }
@@ -172,7 +183,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             var conversation = start
             try {
-                val chat = GeminiChat(key)
+                val chat = client(key)
                 conversation = refreshUploads(chat, conversation, force = false)
                 persist(conversation)
                 val onText: (String) -> Unit = { partial -> _state.update { it.copy(streamingText = partial, status = null) } }

@@ -32,14 +32,25 @@ class ChatException(message: String, val kind: Kind = Kind.OTHER, cause: Throwab
  * Talks to the Google Gemini API (free tier works). The conversation is rebuilt from
  * [ChatMessage]s on every turn; files go through the Gemini Files API.
  */
-class GeminiChat(private val apiKey: String, private val http: OkHttpClient = defaultClient) {
+class GeminiChat(
+    private val apiKey: String?,
+    private val baseUrl: String = BASE,
+    private val appToken: String? = null,
+    private val http: OkHttpClient = defaultClient,
+) {
+    /** With a proxy the key stays on the server; the app only sends its app token. */
+    private fun Request.Builder.auth(): Request.Builder = apply {
+        if (!apiKey.isNullOrBlank()) header("x-goog-api-key", apiKey)
+        if (!appToken.isNullOrBlank()) header("x-app-token", appToken)
+    }
+
 
     /** Uploads a file (resumable upload, two steps) and returns its file URI. */
     fun upload(bytes: ByteArray, displayName: String, mimeType: String): String {
         val startBody = buildJsonObject { putJsonObject("file") { put("display_name", displayName) } }
         val start = Request.Builder()
-            .url("$BASE/upload/v1beta/files")
-            .header("x-goog-api-key", apiKey)
+            .url("$baseUrl/upload/v1beta/files")
+            .auth()
             .header("X-Goog-Upload-Protocol", "resumable")
             .header("X-Goog-Upload-Command", "start")
             .header("X-Goog-Upload-Header-Content-Length", bytes.size.toString())
@@ -51,6 +62,7 @@ class GeminiChat(private val apiKey: String, private val http: OkHttpClient = de
 
         val finish = Request.Builder()
             .url(uploadUrl)
+            .auth()
             .header("X-Goog-Upload-Offset", "0")
             .header("X-Goog-Upload-Command", "upload, finalize")
             .post(bytes.toRequestBody(mimeType.toMediaType()))
@@ -62,7 +74,7 @@ class GeminiChat(private val apiKey: String, private val http: OkHttpClient = de
 
     /** Checks the key by listing models. */
     fun checkKey() {
-        val req = Request.Builder().url("$BASE/v1beta/models?pageSize=1").header("x-goog-api-key", apiKey).get().build()
+        val req = Request.Builder().url("$baseUrl/v1beta/models").auth().get().build()
         call(req) { }
     }
 
@@ -75,8 +87,8 @@ class GeminiChat(private val apiKey: String, private val http: OkHttpClient = de
     ): ReplyResult {
         val body = buildRequest(systemPrompt, history).toString()
         val req = Request.Builder()
-            .url("$BASE/v1beta/models/$model:streamGenerateContent?alt=sse")
-            .header("x-goog-api-key", apiKey)
+            .url("$baseUrl/v1beta/models/$model:streamGenerateContent?alt=sse")
+            .auth()
             .post(body.toRequestBody(JSON_TYPE))
             .build()
         return call(req) { response ->

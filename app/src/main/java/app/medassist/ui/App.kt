@@ -432,6 +432,7 @@ private fun SettingsScreen(state: UiState, vm: ChatViewModel) {
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (!state.usesProxy) {
             Text("Бесплатный ключ Google Gemini", style = MaterialTheme.typography.titleMedium)
             Text(
                 "1. Откройте aistudio.google.com и войдите в Google-аккаунт.\n" +
@@ -457,6 +458,8 @@ private fun SettingsScreen(state: UiState, vm: ChatViewModel) {
                 OutlinedButton(onClick = { visible = !visible }) { Text(if (visible) "Скрыть" else "Показать") }
             }
 
+            }
+
             Text("Модель", style = MaterialTheme.typography.titleMedium)
             listOf(
                 GeminiChat.DEFAULT_MODEL to "умнее, около 20 запросов в день бесплатно",
@@ -480,15 +483,21 @@ private fun SettingsScreen(state: UiState, vm: ChatViewModel) {
                 label = { Text("Или впишите другую модель") },
                 singleLine = true,
             )
+            if (state.usesProxy) {
+                Button(onClick = { vm.saveSettings("", model) }, enabled = !state.checkingKey) {
+                    Text(if (state.checkingKey) "Проверяю…" else "Сохранить")
+                }
+            }
             Text(
                 "Если дневной лимит основной модели закончится, приложение само переключится на облегчённую. " +
                     "Лимиты обновляются в полночь по тихоокеанскому времени (около 11:00 по Москве). " +
-                    "Изменение модели сохраняется кнопкой «Проверить и сохранить».",
+                    "Изменение модели сохраняется кнопкой «Сохранить».",
                 style = MaterialTheme.typography.bodySmall,
             )
             Spacer(Modifier.width(1.dp))
             Text(
-                "Ключ хранится только на этом телефоне. Файлы и сообщения отправляются в Google; " +
+                (if (state.usesProxy) "" else "Ключ хранится только на этом телефоне. ") +
+                    "Файлы и сообщения отправляются в Google; " +
                     "на бесплатном тарифе Google может использовать их для улучшения своих моделей. " +
                     "Копии файлов на сервере Google удаляются автоматически через 48 часов.",
                 style = MaterialTheme.typography.bodySmall,
