@@ -26,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.Badge
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Mic
@@ -66,6 +67,7 @@ fun NewAnalysisScreen(state: UiState, vm: ChatViewModel) {
     var medicines by rememberSaveable { mutableStateOf("") }
     var question by rememberSaveable { mutableStateOf("") }
     var cameraUri by rememberSaveable { mutableStateOf<String?>(null) }
+    var medCard by rememberSaveable { mutableStateOf(false) }
 
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { vm.addFiles(it) }
     val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
@@ -163,6 +165,19 @@ fun NewAnalysisScreen(state: UiState, vm: ChatViewModel) {
                 }
             }
 
+            AppCard(onClick = { medCard = true }, color = MaterialTheme.colorScheme.primaryContainer, border = false, padding = 14.dp) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Badge, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        if (state.profile.hasMedCard) "Медкарта будет учтена: ${state.profile.medCardLines().size} пункта. Нажмите, чтобы изменить."
+                        else "Заполните медкарту (аллергии, болезни, лекарства), и разбор будет точнее.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+            }
+
             AppCard {
                 StepHeader(2, "Расскажите о себе", "Необязательно, но так разбор будет точнее.")
                 Gap(14.dp)
@@ -192,6 +207,7 @@ fun NewAnalysisScreen(state: UiState, vm: ChatViewModel) {
             }
         }
     }
+    if (medCard) MedCardDialog(state, vm) { medCard = false }
 }
 
 @Composable
@@ -254,6 +270,6 @@ fun startVoice(context: Context, launch: (Intent) -> Unit) {
     try {
         launch(intent)
     } catch (e: ActivityNotFoundException) {
-        Toast.makeText(context, "На телефоне нет голосового ввода Google", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, "На телефоне не настроен голосовой ввод", Toast.LENGTH_LONG).show()
     }
 }

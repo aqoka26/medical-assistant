@@ -9,6 +9,11 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 /** Keeps chats, attached files and settings in the app's private storage on the phone. */
 class Store(context: Context) {
@@ -106,4 +111,58 @@ class Store(context: Context) {
     var reminders: List<Reminder>
         get() = readList("reminders.json", Reminder.serializer())
         set(value) = writeList("reminders.json", Reminder.serializer(), value)
+
+    // ---------- backup ----------
+
+    private val backupFiles = listOf("profiles.json", "labs.json", "reminders.json")
+
+    /** Writes all analyses, files, family, lab values and reminders into one ZIP. */
+    fun backup(out: OutputStream) {
+        ZipOutputStream(out).use { zip ->
+            zip.putNextEntry(ZipEntry("medanaliz-backup.txt"))
+            zip.write("MedAnaliz backup v1".toByteArray())
+            zip.closeEntry()
+            fun add(dir: String, f: File) {
+                zip.putNextEntry(ZipEntry("$dir/${f.name}"))
+                f.inputStream().use { it.copyTo(zip) }
+                zip.closeEntry()
+            }
+            conversationsDir.listFiles { f -> f.extension == "json" }?.forEach { add("conversations", it) }
+            attachmentsDir.listFiles()?.filter { it.isFile }?.forEach { add("attachments", it) }
+            backupFiles.map { File(dataDir, it) }.filter { it.exists() }.forEach { add("data", it) }
+        }
+    }
+
+    /** Restores a backup over the current data; returns the number of analyses in it. */
+    fun restore(input: InputStream): Int {
+        val staging = File(dataDir, "restore_tmp").apply { deleteRecursively(); mkdirs() }
+        var valid = false
+        ZipInputStream(input).use { zip ->
+            while (true) {
+                val e = zip.nextEntry ?: break
+                val parts = e.name.split('/')
+                if (e.name == "medanaliz-backup.txt") valid = true
+                // Only known folders and plain file names: nothing can be written outside the app folder.
+                val ok = parts.size == 2 && parts[0] in setOf("conversations", "attachments", "data") &&
+                    parts[1].isNotBlank() && !parts[1].startsWith(".") && "\\" !in parts[1]
+                if (!e.isDirectory && ok) {
+                    val target = File(File(staging, parts[0]).apply { mkdirs() }, parts[1])
+                    target.outputStream().use { zip.copyTo(it) }
+                }
+            }
+        }
+        if (!valid) {
+            staging.deleteRecursively()
+            throw IllegalArgumentException("файл повреждён")
+        }
+        var count = 0
+        File(staging, "conversations").listFiles()?.forEach { f ->
+            if (f.extension == "json") count++
+            f.copyTo(File(conversationsDir, f.name), overwrite = true)
+        }
+        File(staging, "attachments").listFiles()?.forEach { it.copyTo(File(attachmentsDir, it.name), overwrite = true) }
+        File(staging, "data").listFiles()?.filter { it.name in backupFiles }?.forEach { it.copyTo(File(dataDir, it.name), overwrite = true) }
+        staging.deleteRecursively()
+        return count
+    }
 }

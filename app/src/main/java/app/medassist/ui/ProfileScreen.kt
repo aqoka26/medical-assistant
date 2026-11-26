@@ -17,6 +17,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Fingerprint
+import androidx.compose.material.icons.outlined.Badge
+import androidx.compose.material.icons.outlined.Backup
+import androidx.compose.material.icons.outlined.Restore
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Key
@@ -56,6 +63,12 @@ fun ProfileScreen(state: UiState, vm: ChatViewModel, canUseLock: () -> Boolean) 
     var key by rememberSaveable { mutableStateOf(state.apiKey) }
     var model by rememberSaveable { mutableStateOf(state.model) }
     var visible by remember { mutableStateOf(false) }
+    var medCard by remember { mutableStateOf(false) }
+    var restoreUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null) vm.exportBackup(uri)
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> restoreUri = uri }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         TabTitle("Профиль")
@@ -114,8 +127,33 @@ fun ProfileScreen(state: UiState, vm: ChatViewModel, canUseLock: () -> Boolean) 
                 }
             }
 
+            SectionLabel("Медкарта")
+            AppCard(padding = 8.dp) {
+                Column(Modifier.padding(horizontal = 10.dp)) {
+                    NavRow(
+                        Icons.Outlined.Badge, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer,
+                        "Медкарта: ${state.profile.name}",
+                        if (state.profile.hasMedCard) state.profile.medCardLines().joinToString(" · ").take(80)
+                        else "Аллергии, болезни, лекарства, группа крови",
+                    ) { medCard = true }
+                }
+            }
+
             SectionLabel("Напоминания")
             RemindersCard(state, vm)
+
+            SectionLabel("Резервная копия")
+            AppCard(padding = 8.dp) {
+                Column(Modifier.padding(horizontal = 10.dp)) {
+                    NavRow(Icons.Outlined.Backup, a.blue, a.blueBg, "Сохранить копию", "Все разборы, файлы и показатели в один файл") {
+                        exportLauncher.launch("МедАнализ_копия_" + java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date()) + ".zip")
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    NavRow(Icons.Outlined.Restore, a.violet, a.violetBg, "Восстановить из копии", "Например, на новом телефоне") {
+                        importLauncher.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed"))
+                    }
+                }
+            }
 
             SectionLabel("Безопасность")
             AppCard {
@@ -138,7 +176,7 @@ fun ProfileScreen(state: UiState, vm: ChatViewModel, canUseLock: () -> Boolean) 
             }
 
             if (!state.usesProxy) {
-                SectionLabel("Ключ Google Gemini")
+                SectionLabel("Ключ ИИ-сервиса")
                 AppCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconTile(Icons.Outlined.Key, a.warn, a.warnBg, 40.dp)
@@ -196,9 +234,8 @@ fun ProfileScreen(state: UiState, vm: ChatViewModel, canUseLock: () -> Boolean) 
                         Gap(4.dp)
                         Text(
                             "Не ставит диагноз и не заменяет врача. При опасных симптомах звоните 103 или 112.\n\n" +
-                                "Разборы и файлы хранятся на этом телефоне. Для анализа документы отправляются в Google; " +
-                                "на бесплатном тарифе Google может использовать их для улучшения своих моделей. " +
-                                "Копии файлов у Google удаляются через 48 часов.",
+                                "Разборы и файлы хранятся на этом телефоне. Для разбора документы передаются стороннему ИИ-сервису " +
+                                "на зарубежных серверах; копии файлов там удаляются автоматически через 48 часов.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -221,4 +258,14 @@ fun ProfileScreen(state: UiState, vm: ChatViewModel, canUseLock: () -> Boolean) 
         }
     }
     if (family) ProfileDialog(state, vm) { family = false }
+    if (medCard) MedCardDialog(state, vm) { medCard = false }
+    restoreUri?.let { uri ->
+        AlertDialog(
+            onDismissRequest = { restoreUri = null },
+            title = { Text("Восстановить из копии?") },
+            text = { Text("Разборы, файлы, семья и показатели из копии заменят совпадающие данные на этом телефоне.") },
+            confirmButton = { TextButton(onClick = { vm.importBackup(uri); restoreUri = null }) { Text("Восстановить") } },
+            dismissButton = { TextButton(onClick = { restoreUri = null }) { Text("Отмена") } },
+        )
+    }
 }

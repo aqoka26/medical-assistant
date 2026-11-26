@@ -21,6 +21,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ShowChart
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Alarm
+import androidx.compose.material.icons.outlined.Badge
+import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.material.icons.outlined.FamilyRestroom
 import androidx.compose.material.icons.outlined.IosShare
 import androidx.compose.material.icons.outlined.UploadFile
@@ -59,6 +61,8 @@ fun HomeScreen(state: UiState, vm: ChatViewModel) {
     var showFamily by remember { mutableStateOf(false) }
     var showEmias by remember { mutableStateOf(false) }
     var addReminder by remember { mutableStateOf(false) }
+    var medCard by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
     val a = LocalAccents.current
     val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     val greeting = when (hour) {
@@ -102,6 +106,14 @@ fun HomeScreen(state: UiState, vm: ChatViewModel) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ServiceTile(Icons.AutoMirrored.Outlined.ShowChart, a.good, a.goodBg, "Динамика", "${state.profileLabs.map { it.name }.distinct().size} показателей", Modifier.weight(1f)) { vm.show(Screen.LABS) }
                 ServiceTile(Icons.Outlined.Alarm, a.warn, a.warnBg, "Напомнить", if (state.reminders.isEmpty()) "о пересдаче" else "${state.reminders.size} активных", Modifier.weight(1f)) { addReminder = true }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ServiceTile(Icons.Outlined.Badge, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer, "Медкарта", if (state.profile.hasMedCard) "заполнена" else "заполнить", Modifier.weight(1f)) { medCard = true }
+                ServiceTile(Icons.Outlined.PictureAsPdf, a.bad, a.badBg, "Для врача", "сводка в PDF", Modifier.weight(1f)) {
+                    if (state.profileLabs.isEmpty() && state.profileConversations.isEmpty()) {
+                        android.widget.Toast.makeText(context, "Сначала сделайте хотя бы один разбор", android.widget.Toast.LENGTH_LONG).show()
+                    } else shareDoctorSummary(context, state, vm)
+                }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ServiceTile(Icons.Outlined.FamilyRestroom, a.violet, a.violetBg, "Семья", "${state.profiles.size} " + people(state.profiles.size), Modifier.weight(1f)) { showFamily = true }
@@ -151,6 +163,7 @@ fun HomeScreen(state: UiState, vm: ChatViewModel) {
 
     if (showFamily) ProfileDialog(state, vm) { showFamily = false }
     if (addReminder) ReminderDialog(vm) { addReminder = false }
+    if (medCard) MedCardDialog(state, vm) { medCard = false }
     if (showEmias) {
         AlertDialog(
             onDismissRequest = { showEmias = false },

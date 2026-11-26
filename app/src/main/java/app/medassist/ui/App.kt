@@ -145,8 +145,9 @@ private fun WelcomeScreen(onStart: () -> Unit) {
             WelcomePoint(Icons.Outlined.VerifiedUser, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer, "Данные на вашем телефоне", "История хранится только у вас. Можно закрыть приложение отпечатком пальца.")
             Gap(12.dp)
             Text(
-                "МедАнализ не ставит диагноз и не заменяет врача. ИИ может ошибаться. При опасных симптомах сразу звоните 103 или 112. " +
-                    "Документы отправляются на обработку в Google.",
+                "МедАнализ не ставит диагноз и не заменяет врача. ИИ может ошибаться. При опасных симптомах сразу звоните 103 или 112.\n\n" +
+                    "Нажимая «Начать», вы соглашаетесь, что загруженные документы обрабатывает сторонний ИИ-сервис на зарубежных серверах. " +
+                    "История разборов хранится только на вашем телефоне.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

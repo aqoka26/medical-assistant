@@ -60,6 +60,11 @@ import androidx.core.content.ContextCompat
 import app.medassist.ChatViewModel
 import androidx.compose.material.icons.automirrored.outlined.ShowChart
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.material.icons.outlined.Lightbulb
+import androidx.compose.material.icons.outlined.PictureAsPdf
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.size
 import app.medassist.UiState
 import app.medassist.core.LabResult
 import app.medassist.core.Profile
@@ -153,44 +158,80 @@ private val reminderOptions = listOf(
     7 to "Через неделю",
     14 to "Через 2 недели",
     30 to "Через месяц",
+    60 to "Через 2 месяца",
     90 to "Через 3 месяца",
     180 to "Через полгода",
 )
 
-@Composable
-fun ReminderDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    var text by rememberSaveable { mutableStateOf("Пересдать анализы") }
-    var days by rememberSaveable { mutableStateOf(30) }
-    var hour by rememberSaveable { mutableStateOf(10) }
-    val askPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+private val courseOptions = listOf(7 to "7 дней", 14 to "14 дней", 30 to "1 месяц", 60 to "2 месяца", 90 to "3 месяца")
 
-    val at = Calendar.getInstance().apply {
-        add(Calendar.DAY_OF_YEAR, days)
+/**
+ * Reminder: once (repeat a test, see a doctor) or a medicine course (every day at a set time).
+ * [initialText]/[initialDays] come from the analysis when it advises a re-test.
+ */
+@Composable
+fun ReminderDialog(
+    vm: ChatViewModel,
+    initialText: String = "Пересдать анализы",
+    initialDays: Int = 30,
+    medicine: Boolean = false,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    var course by rememberSaveable { mutableStateOf(medicine) }
+    var text by rememberSaveable { mutableStateOf(if (medicine) "" else initialText) }
+    var days by rememberSaveable { mutableStateOf(initialDays) }
+    var courseDays by rememberSaveable { mutableStateOf(30) }
+    var hour by rememberSaveable { mutableStateOf(if (medicine) 9 else 10) }
+    val askPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val options = if (reminderOptions.any { it.first == initialDays }) reminderOptions
+    else (listOf(initialDays to "Через $initialDays дн.") + reminderOptions)
+
+    val first = Calendar.getInstance().apply {
+        if (!course) add(Calendar.DAY_OF_YEAR, days)
         set(Calendar.HOUR_OF_DAY, hour); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        if (course && timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_YEAR, 1)
     }.timeInMillis
+    val until = first + (courseDays - 1) * 86_400_000L + 60_000L
+    val f = SimpleDateFormat("d MMMM yyyy, HH:mm", Locale("ru"))
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Напоминание") },
+        title = { Text(if (course) "Приём лекарства" else "Напоминание") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = !course, onClick = { course = false }, label = { Text("Один раз") })
+                    FilterChip(selected = course, onClick = { course = true }, label = { Text("Лекарство каждый день") })
+                }
                 OutlinedTextField(
                     value = text, onValueChange = { text = it.take(200) },
-                    label = { Text("О чём напомнить") }, modifier = Modifier.fillMaxWidth(),
+                    label = { Text(if (course) "Лекарство и доза" else "О чём напомнить") },
+                    placeholder = { if (course) Text("Например: железо 1 таблетка") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                    colors = fieldColors(),
                 )
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    reminderOptions.forEach { (d, label) ->
-                        FilterChip(selected = days == d, onClick = { days = d }, label = { Text(label) })
+                if (course) {
+                    Text("Сколько дней", style = MaterialTheme.typography.labelLarge)
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        courseOptions.forEach { (d, label) -> FilterChip(selected = courseDays == d, onClick = { courseDays = d }, label = { Text(label) }) }
+                    }
+                } else {
+                    Text("Когда", style = MaterialTheme.typography.labelLarge)
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        options.forEach { (d, label) -> FilterChip(selected = days == d, onClick = { days = d }, label = { Text(label) }) }
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(9, 12, 18).forEach { h ->
+                Text("Во сколько", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    (if (course) listOf(8, 9, 12, 14, 18, 21) else listOf(9, 12, 18)).forEach { h ->
                         FilterChip(selected = hour == h, onClick = { hour = h }, label = { Text("%02d:00".format(h)) })
                     }
                 }
                 Text(
-                    "Придёт уведомление " + SimpleDateFormat("d MMMM yyyy, HH:mm", Locale("ru")).format(Date(at)),
+                    if (course) "Каждый день в %02d:00, до ".format(hour) + SimpleDateFormat("d MMMM", Locale("ru")).format(Date(until))
+                    else "Придёт уведомление " + f.format(Date(first)),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -202,7 +243,8 @@ fun ReminderDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
                     if (Build.VERSION.SDK_INT >= 33 &&
                         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
                     ) askPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    vm.addReminder(text, at)
+                    if (course) vm.addReminder("Пора принять: " + text.trim(), first, daily = true, until = until)
+                    else vm.addReminder(text, first)
                     onDismiss()
                 },
                 enabled = text.isNotBlank(),
@@ -245,7 +287,16 @@ fun LabsScreen(state: UiState, vm: ChatViewModel) {
     val a = LocalAccents.current
 
     Column(Modifier.fillMaxSize()) {
-        TabTitle("Анализы", subtitle = state.profile.name.takeIf { state.profileId != app.medassist.core.Profile.ME })
+        val context = LocalContext.current
+        TabTitle("Анализы", subtitle = state.profile.name.takeIf { state.profileId != app.medassist.core.Profile.ME }) {
+            if (all.isNotEmpty()) {
+                TextButton(onClick = { shareDoctorSummary(context, state, vm) }) {
+                    Icon(Icons.Outlined.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Для врача")
+                }
+            }
+        }
         if (all.isEmpty()) {
             Column(
                 Modifier.fillMaxSize().padding(32.dp),
@@ -291,7 +342,14 @@ fun LabsScreen(state: UiState, vm: ChatViewModel) {
                         )
                     }
                 }
-                items(groups, key = { it.first }) { (name, values) -> LabCard(name, values.sortedBy { it.date }, vm::deleteLab) }
+                items(groups, key = { it.first }) { (name, values) ->
+                    LabCard(
+                        name, values.sortedBy { it.date }, vm::deleteLab,
+                        explanation = state.explanations[name],
+                        explaining = state.explaining == name,
+                        onExplain = { vm.explainLab(name) },
+                    )
+                }
             }
         }
     }
@@ -306,7 +364,14 @@ private fun StatTile(value: String, label: String, tint: Color, bg: Color, modif
 }
 
 @Composable
-private fun LabCard(name: String, values: List<LabResult>, onDelete: (LabResult) -> Unit) {
+private fun LabCard(
+    name: String,
+    values: List<LabResult>,
+    onDelete: (LabResult) -> Unit,
+    explanation: String?,
+    explaining: Boolean,
+    onExplain: () -> Unit,
+) {
     var expanded by rememberSaveable(name) { mutableStateOf(false) }
     val last = values.last()
     val ref = parseRef(values.lastOrNull { it.ref.isNotBlank() }?.ref.orEmpty())
@@ -342,6 +407,28 @@ private fun LabCard(name: String, values: List<LabResult>, onDelete: (LabResult)
                             modifier = Modifier.weight(1f),
                         )
                         TextButton(onClick = { onDelete(v) }) { Text("Убрать") }
+                    }
+                }
+                Gap(4.dp)
+                if (explanation != null) {
+                    Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.medium) {
+                        Column(Modifier.padding(14.dp)) {
+                            Text("Что это значит", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                            Gap(6.dp)
+                            com.mikepenz.markdown.m3.Markdown(content = explanation)
+                        }
+                    }
+                } else {
+                    OutlinedButton(onClick = onExplain, enabled = !explaining, shape = MaterialTheme.shapes.medium) {
+                        if (explaining) {
+                            TypingDots()
+                            Spacer(Modifier.width(10.dp))
+                            Text("Объясняю…")
+                        } else {
+                            Icon(Icons.Outlined.Lightbulb, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Что это за показатель?")
+                        }
                     }
                 }
             } else {
@@ -410,6 +497,7 @@ private fun LabChart(values: List<LabResult>, ref: Pair<Double?, Double?>) {
 @Composable
 fun RemindersCard(state: UiState, vm: ChatViewModel) {
     var adding by remember { mutableStateOf(false) }
+    var addingMed by remember { mutableStateOf(false) }
     val f = SimpleDateFormat("d MMMM yyyy, HH:mm", Locale("ru"))
     AppCard {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -424,14 +512,98 @@ fun RemindersCard(state: UiState, vm: ChatViewModel) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(r.text, style = MaterialTheme.typography.bodyMedium)
-                        Text(f.format(Date(r.at)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            if (r.daily) "каждый день в " + SimpleDateFormat("HH:mm", Locale("ru")).format(Date(r.at)) +
+                                ", до " + SimpleDateFormat("d MMMM", Locale("ru")).format(Date(r.until))
+                            else f.format(Date(r.at)),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     TextButton(onClick = { vm.deleteReminder(r) }) { Text("Удалить") }
                 }
             }
-            TextButton(onClick = { adding = true }) { Text("+ Добавить напоминание") }
+            Row {
+                TextButton(onClick = { adding = true }) { Text("+ Напоминание") }
+                TextButton(onClick = { addingMed = true }) { Text("+ Лекарство") }
+            }
             Spacer(Modifier.height(0.dp))
         }
     }
     if (adding) ReminderDialog(vm) { adding = false }
+    if (addingMed) ReminderDialog(vm, medicine = true) { addingMed = false }
+}
+
+/** Builds the one-page summary for a doctor and opens the share sheet. */
+fun shareDoctorSummary(context: android.content.Context, state: UiState, vm: ChatViewModel) {
+    runCatching {
+        app.medassist.PdfReport.share(
+            context,
+            vm.doctorSummary(),
+            "Сводка для врача",
+            state.profile.name.takeIf { state.profileId != app.medassist.core.Profile.ME },
+            heading = "МедАнализ — сводка для врача",
+        )
+    }.onFailure { android.widget.Toast.makeText(context, "Не удалось создать PDF", android.widget.Toast.LENGTH_LONG).show() }
+}
+
+// ---------- medical card ----------
+
+@Composable
+fun MedCardDialog(state: UiState, vm: ChatViewModel, onDismiss: () -> Unit) {
+    val p = state.profile
+    var blood by rememberSaveable(p.id) { mutableStateOf(p.bloodType) }
+    var allergies by rememberSaveable(p.id) { mutableStateOf(p.allergies) }
+    var chronic by rememberSaveable(p.id) { mutableStateOf(p.chronic) }
+    var medicines by rememberSaveable(p.id) { mutableStateOf(p.medicines) }
+    var year by rememberSaveable(p.id) { mutableStateOf(p.birthYear?.toString().orEmpty()) }
+    var sex by rememberSaveable(p.id) { mutableStateOf(p.sex) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Медкарта" + if (p.id != app.medassist.core.Profile.ME) ": ${p.name}" else "") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Заполните один раз. Эти данные будут учитываться в каждом разборе и попадут в сводку для врача.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = sex == "м", onClick = { sex = if (sex == "м") null else "м" }, label = { Text("Мужчина") })
+                    FilterChip(selected = sex == "ж", onClick = { sex = if (sex == "ж") null else "ж" }, label = { Text("Женщина") })
+                }
+                OutlinedTextField(
+                    value = year, onValueChange = { year = it.filter(Char::isDigit).take(4) },
+                    label = { Text("Год рождения") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    shape = MaterialTheme.shapes.medium, colors = fieldColors(),
+                )
+                Text("Группа крови", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("O(I)", "A(II)", "B(III)", "AB(IV)").forEach { g ->
+                        listOf("+", "−").forEach { rh ->
+                            val v = "$g Rh$rh"
+                            FilterChip(selected = blood == v, onClick = { blood = if (blood == v) "" else v }, label = { Text("$g$rh") })
+                        }
+                    }
+                }
+                VoiceField(allergies, { allergies = it }, "Аллергии и непереносимость", "Например: пенициллин, орехи")
+                VoiceField(chronic, { chronic = it }, "Хронические болезни, операции", "Например: гастрит, удалён желчный")
+                VoiceField(medicines, { medicines = it }, "Что принимаете постоянно", "Лекарства, добавки и дозы")
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                vm.updateMedCard(
+                    p.copy(
+                        bloodType = blood, allergies = allergies.trim(), chronic = chronic.trim(), medicines = medicines.trim(),
+                        birthYear = year.toIntOrNull()?.takeIf { it in 1900..2100 }, sex = sex,
+                    )
+                )
+                onDismiss()
+            }) { Text("Сохранить") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
 }

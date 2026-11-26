@@ -60,6 +60,10 @@ data class UiState(
     val profileId: String = Profile.ME,
     val labs: List<LabResult> = emptyList(),
     val reminders: List<Reminder> = emptyList(),
+    /** Plain-language explanations of lab values, by indicator name. */
+    val explanations: Map<String, String> = emptyMap(),
+    /** Indicator being explained right now. */
+    val explaining: String? = null,
 ) {
     val ready: Boolean get() = usesProxy || apiKey.isNotBlank()
     val profile: Profile get() = profiles.firstOrNull { it.id == profileId } ?: Profile.DEFAULT
@@ -256,11 +260,151 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- reminders ----------
 
-    fun addReminder(text: String, at: Long) {
-        val r = Reminder((System.currentTimeMillis() % Int.MAX_VALUE).toInt(), text.trim(), at)
+    fun addReminder(text: String, at: Long, daily: Boolean = false, until: Long = 0) {
+        val r = Reminder((System.currentTimeMillis() % Int.MAX_VALUE).toInt(), text.trim(), at, daily, until)
         store.reminders = store.reminders + r
         Reminders.schedule(getApplication<Application>(), r)
         _state.update { it.copy(reminders = (it.reminders + r).sortedBy { x -> x.at }, notice = "Напоминание сохранено") }
+    }
+
+    // ---------- medical card, explanations, doctor's summary, backup ----------
+
+    fun updateMedCard(p: Profile) {
+        updateProfile(p)
+        _state.update { it.copy(notice = "Медкарта сохранена") }
+    }
+
+    private fun previousContext(current: Conversation): String {
+        val s = _state.value
+        val prev = s.conversations
+            .filter { it.profileId == current.profileId && it.id != current.id }
+            .sortedByDescending { it.createdAt }
+            .firstNotNullOfOrNull { c ->
+                c.messages.firstOrNull { it.role == Role.ASSISTANT && !it.isError && it.text.length > 300 }?.let { c to it }
+            }
+        val labs = s.labs.filter { it.profileId == current.profileId }
+        if (prev == null && labs.isEmpty()) return ""
+        return buildString {
+            append("\n\n## ЧТО БЫЛО РАНЬШЕ (для раздела «Что изменилось с прошлого раза»)")
+            prev?.let { (c, m) ->
+                append("\n\nПредыдущий разбор от ")
+                append(SimpleDateFormat("dd.MM.yyyy", Locale("ru")).format(Date(c.createdAt)))
+                append(":\n\n").append(Labs.visible(m.text).take(5000))
+            }
+            if (labs.isNotEmpty()) {
+                append("\n\nРанее сохранённые значения анализов:\n")
+                labs.takeLast(200).forEach { append("- ${it.name}: ${it.value} ${it.unit} (${it.date})\n") }
+            }
+        }
+    }
+
+    fun explainLab(name: String) {
+        val s = _state.value
+        if (s.explaining != null) return
+        if (s.explanations.containsKey(name)) return
+        val values = s.profileLabs.filter { it.name == name }.sortedBy { it.date }
+        if (values.isEmpty()) return
+        val profile = s.profile
+        _state.update { it.copy(explaining = name) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val question = buildString {
+                append("Показатель: $name.\n")
+                values.forEach { append("${it.date}: ${it.value} ${it.unit}${if (it.ref.isNotBlank()) " (норма ${it.ref})" else ""}\n") }
+                append("Пациент: ${profile.describe()}.")
+            }
+            val rules = "Ты — ИИ-помощник приложения «МедАнализ». Объясни простыми словами для человека без медицинского " +
+                "образования: что это за показатель и за что он отвечает; что значит текущее значение и его изменение; " +
+                "частые причины такого результата; когда стоит обратиться к врачу и к какому. 120–200 слов, короткие абзацы " +
+                "или список, без заголовков и таблиц, без диагноза. Не называй модель или компанию, на которой работаешь."
+            try {
+                val r = client().reply(_state.value.model, rules, listOf(ChatMessage(Role.USER, question, timestamp = System.currentTimeMillis()))) { }
+                val text = Labs.visible(r.text).ifBlank { "Не удалось получить объяснение. Попробуйте позже." }
+                _state.update { it.copy(explaining = null, explanations = it.explanations + (name to text)) }
+            } catch (e: Exception) {
+                _state.update { it.copy(explaining = null, notice = e.message ?: "Не удалось получить объяснение") }
+            }
+            refreshUsage()
+        }
+    }
+
+    /** One-page summary for a doctor's visit, as Markdown for the PDF. */
+    fun doctorSummary(): String {
+        val s = _state.value
+        val p = s.profile
+        val fmtIn = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val fmtOut = SimpleDateFormat("dd.MM.yy", Locale("ru"))
+        fun d(iso: String) = runCatching { fmtOut.format(fmtIn.parse(iso)!!) }.getOrDefault(iso)
+        fun n(v: Double) = if (v == Math.rint(v)) v.toLong().toString() else v.toString().replace('.', ',')
+        val last = s.profileConversations.firstOrNull()
+        val firstUser = last?.messages?.firstOrNull { it.role == Role.USER }?.text.orEmpty()
+        val report = last?.messages?.firstOrNull { it.role == Role.ASSISTANT && !it.isError && it.text.length > 300 }
+            ?.let { app.medassist.core.Report.parse(it.text) }
+        return buildString {
+            append("## Пациент\n")
+            append("- ").append(p.describe().replace(Regex("^Я(,|$)"), "Пациент$1")).append("\n")
+            p.medCardLines().forEach { append("- ").append(it).append("\n") }
+            val complaints = firstUser.lines().filter { it.startsWith("Жалобы") || it.startsWith("Лекарства") }
+            if (complaints.isNotEmpty()) {
+                append("\n## Со слов пациента\n")
+                complaints.forEach { append("- ").append(it).append("\n") }
+            }
+            val labs = s.profileLabs.groupBy { it.name }.toSortedMap()
+            if (labs.isNotEmpty()) {
+                append("\n## Показатели в динамике\n")
+                labs.forEach { (name, vs) ->
+                    val sorted = vs.sortedBy { it.date }
+                    val ref = sorted.lastOrNull { it.ref.isNotBlank() }?.ref
+                    append("- **").append(name).append("**: ")
+                    append(sorted.takeLast(5).joinToString(" → ") { "${n(it.value)} (${d(it.date)})" })
+                    append(" ").append(sorted.last().unit)
+                    ref?.let { append(", норма ").append(it) }
+                    append("\n")
+                }
+            }
+            report?.let { r ->
+                append("\n## Последний разбор")
+                last?.let { append(" от ").append(SimpleDateFormat("dd.MM.yyyy", Locale("ru")).format(Date(it.createdAt))) }
+                append("\n")
+                r.summary?.let { append(it).append("\n") }
+                r.sections.filter { sec ->
+                    val t = sec.title.lowercase()
+                    "главн" in t || "делать" in t || "уточн" in t || "вниман" in t
+                }.forEach { sec -> append("\n### ").append(sec.title).append("\n").append(sec.body).append("\n") }
+            }
+        }
+    }
+
+    fun exportBackup(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = runCatching {
+                getApplication<Application>().contentResolver.openOutputStream(uri)!!.use { store.backup(it) }
+            }
+            _state.update { it.copy(notice = if (ok.isSuccess) "Копия сохранена. Храните файл в надёжном месте." else "Не удалось сохранить копию") }
+        }
+    }
+
+    fun importBackup(uri: Uri) {
+        if (_state.value.sending) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                getApplication<Application>().contentResolver.openInputStream(uri)!!.use { store.restore(it) }
+            }
+            if (result.isSuccess) {
+                Reminders.rescheduleAll(getApplication<Application>())
+                val profiles = store.profiles
+                _state.update {
+                    it.copy(
+                        conversations = store.loadAll(), profiles = profiles, labs = store.labs,
+                        reminders = store.reminders.filter { r -> r.at > System.currentTimeMillis() || r.daily },
+                        profileId = Profile.ME, current = null, screen = Screen.HOME,
+                        notice = "Восстановлено разборов: ${result.getOrDefault(0)}",
+                    )
+                }
+                store.currentProfileId = Profile.ME
+            } else {
+                _state.update { it.copy(notice = "Это не похоже на копию МедАнализа: ${result.exceptionOrNull()?.message ?: ""}") }
+            }
+        }
     }
 
     fun deleteReminder(r: Reminder) {
@@ -405,9 +549,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val prompt = buildString {
             append(systemPrompt)
             append("\n\n").append(Labs.INSTRUCTION)
-            if (profile.id != Profile.ME || profile.birthYear != null || profile.sex != null) {
+            if (profile.id != Profile.ME || profile.birthYear != null || profile.sex != null || profile.hasMedCard) {
                 append("\n\n## ПАЦИЕНТ\n\nДокументы относятся к: ").append(profile.describe()).append('.')
+                profile.medCardLines().forEach { append("\n- ").append(it) }
             }
+            // For a new analysis: what was known before, so the model can say what changed.
+            if (start.messages.none { it.role == Role.ASSISTANT && !it.isError }) append(previousContext(start))
         }
         _state.update { it.copy(sending = true, streamingText = null, status = "Отправка…") }
         viewModelScope.launch(Dispatchers.IO) {
@@ -418,7 +565,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 persist(conversation)
                 val onText: (String) -> Unit = { partial -> _state.update { it.copy(streamingText = partial, status = null) } }
                 val ask: (String) -> app.medassist.core.ReplyResult = { m ->
-                    _state.update { it.copy(status = "Gemini изучает данные…") }
+                    _state.update { it.copy(status = "ИИ изучает документы…") }
                     chat.reply(m, prompt, conversation.messages, onText)
                 }
                 val result = try {
@@ -432,7 +579,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         }
                         e.kind == ChatException.Kind.DAILY_LIMIT && model != GeminiChat.LITE_MODEL -> {
                             _state.update {
-                                it.copy(notice = "Дневной лимит основной модели исчерпан, отвечает облегчённая модель")
+                                it.copy(notice = "Подробный режим сегодня перегружен, отвечает быстрый")
                             }
                             ask(GeminiChat.LITE_MODEL)
                         }

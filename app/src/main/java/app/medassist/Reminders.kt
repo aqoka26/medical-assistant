@@ -72,7 +72,16 @@ class ReminderReceiver : BroadcastReceiver() {
         val id = intent.getIntExtra("id", 0)
         Reminders.show(context, id, intent.getStringExtra("text") ?: "")
         val store = Store(context)
-        store.reminders = store.reminders.filterNot { it.id == id }
+        val r = store.reminders.firstOrNull { it.id == id }
+        val next = r?.at?.plus(86_400_000L)
+        if (r != null && r.daily && next != null && next <= r.until) {
+            // Medicine course: same time tomorrow.
+            val updated = r.copy(at = next)
+            store.reminders = store.reminders.map { if (it.id == id) updated else it }
+            Reminders.schedule(context, updated)
+        } else {
+            store.reminders = store.reminders.filterNot { it.id == id }
+        }
     }
 }
 

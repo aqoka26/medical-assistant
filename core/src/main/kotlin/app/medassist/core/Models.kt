@@ -54,12 +54,27 @@ data class Profile(
     val birthYear: Int? = null,
     /** "м" or "ж", or null when not given. */
     val sex: String? = null,
+    // Medical card: filled once, added to every analysis.
+    val allergies: String = "",
+    val chronic: String = "",
+    val medicines: String = "",
+    val bloodType: String = "",
 ) {
+    val hasMedCard: Boolean get() = listOf(allergies, chronic, medicines, bloodType).any { it.isNotBlank() }
+
     fun describe(): String = buildString {
         append(name)
         sex?.let { append(", пол: ").append(if (it == "ж") "женский" else "мужской") }
         birthYear?.let { append(", год рождения: ").append(it) }
     }
+
+    /** Medical card as lines for the prompt and the doctor's summary. */
+    fun medCardLines(): List<String> = listOfNotNull(
+        bloodType.takeIf { it.isNotBlank() }?.let { "Группа крови: $it" },
+        allergies.takeIf { it.isNotBlank() }?.let { "Аллергии и непереносимость: $it" },
+        chronic.takeIf { it.isNotBlank() }?.let { "Хронические болезни и операции: $it" },
+        medicines.takeIf { it.isNotBlank() }?.let { "Постоянно принимает: $it" },
+    )
 
     companion object {
         const val ME = "me"
@@ -83,5 +98,9 @@ data class LabResult(
 data class Reminder(
     val id: Int,
     val text: String,
+    /** Next time it fires. */
     val at: Long,
+    /** Medicine course: repeats every day until [until]. */
+    val daily: Boolean = false,
+    val until: Long = 0,
 )

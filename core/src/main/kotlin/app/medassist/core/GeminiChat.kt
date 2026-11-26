@@ -110,7 +110,7 @@ class GeminiChat(
                 chunk.blockReason?.let { blocked = it }
             }
             if (blocked != null && text.isEmpty()) {
-                throw ChatException("Gemini заблокировал запрос фильтром безопасности ($blocked). Попробуйте переформулировать.")
+                throw ChatException("ИИ не смог обработать запрос из-за фильтра безопасности. Попробуйте переформулировать.")
             }
             ReplyResult(text.toString(), finish, model)
         }
@@ -176,7 +176,7 @@ class GeminiChat(
         val response = try {
             http.newCall(request).execute()
         } catch (e: IOException) {
-            throw ChatException("Нет связи с сервером Google. Проверьте интернет и попробуйте снова.", cause = e)
+            throw ChatException("Нет связи с сервером. Проверьте интернет и попробуйте снова.", cause = e)
         }
         response.use {
             if (!it.isSuccessful) throw toError(it.code, it.body?.string().orEmpty())
@@ -234,7 +234,7 @@ class GeminiChat(
                 "unauthenticated" in lower -> ChatException(message.ifBlank { "Войдите в аккаунт." }, ChatException.Kind.AUTH)
                 "\"blocked\"" in lower -> ChatException(message, ChatException.Kind.AUTH)
                 code == 429 && "perday" in lower -> ChatException(
-                    "Исчерпан бесплатный дневной лимит Gemini. Он обновится в полночь по тихоокеанскому времени (около 11:00 по Москве).",
+                    "Сервис сегодня перегружен. Попробуйте позже, лимит обновится около 11:00 по Москве.",
                     ChatException.Kind.DAILY_LIMIT,
                 )
                 code == 429 -> ChatException(
@@ -242,7 +242,7 @@ class GeminiChat(
                     ChatException.Kind.MINUTE_LIMIT,
                 )
                 "location is not supported" in lower || "not available in your country" in lower -> ChatException(
-                    "Gemini API недоступен в вашей стране. Нужен VPN в поддерживаемую страну.",
+                    "Сервис временно недоступен. Попробуйте позже.",
                 )
                 code == 400 && "api key not valid" in lower || code == 401 -> ChatException(
                     "Ключ API не подходит. Проверьте его в настройках.",
@@ -250,16 +250,16 @@ class GeminiChat(
                 code == 403 && ("file" in lower || "permission" in lower) -> ChatException(
                     "Файл на сервере устарел, загружаю заново.", ChatException.Kind.FILE_GONE,
                 )
-                code == 404 -> ChatException("Модель не найдена ($message). Выберите другую модель в настройках.")
-                else -> ChatException("Ошибка Gemini ($code): ${message.ifBlank { body.take(300) }}")
+                code == 404 -> ChatException("Режим разбора недоступен. Выберите другой в профиле.")
+                else -> ChatException("Ошибка сервера ($code). Попробуйте ещё раз.")
             }
         }
 
         fun describeFinish(reason: String?): String? = when (reason) {
             "MAX_TOKENS" -> "Ответ оборван из-за длины. Напишите «продолжай»."
             "SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII" ->
-                "Gemini остановил ответ фильтром безопасности. Попробуйте переформулировать."
-            "RECITATION" -> "Gemini остановил ответ (повтор защищённого текста). Попробуйте переформулировать."
+                "ИИ остановил ответ фильтром безопасности. Попробуйте переформулировать."
+            "RECITATION" -> "ИИ остановил ответ. Попробуйте переформулировать."
             else -> null
         }
     }

@@ -23,6 +23,10 @@ object DemoData {
         - Гемоглобин **128 г/л** (норма 120–150) пока в норме, но близко к нижней границе.
         - Без восполнения железа через несколько месяцев может начаться анемия.
 
+        ## Что изменилось с прошлого раза
+        - Ферритин снизился с **14 до 9 нг/мл** за полгода: запасы железа продолжают уменьшаться.
+        - Гемоглобин немного снизился: 131 → 128 г/л.
+
         ## Что в порядке
         - Лейкоциты, тромбоциты и СОЭ в норме: признаков воспаления нет.
         - Гормон щитовидной железы (ТТГ 1,9 мЕд/л) в норме.
@@ -86,13 +90,13 @@ object DemoData {
             locked = false,
             login = "anna",
             usage = Usage("anna", 3, 10),
-            profiles = listOf(Profile.DEFAULT, Profile("mom", "Мама", 1962, "ж"), Profile("son", "Миша", 2015, "м")),
+            profiles = listOf(Profile.DEFAULT.copy(sex = "ж", birthYear = 1990, bloodType = "A(II) Rh+", allergies = "пенициллин"), Profile("mom", "Мама", 1962, "ж"), Profile("son", "Миша", 2015, "м")),
             profileId = Profile.ME,
             conversations = listOf(c1, c2),
             current = if (screen == Screen.REPORT) c1 else null,
             pending = if (screen == Screen.NEW) files.take(2) else emptyList(),
             labs = labs,
-            reminders = listOf(Reminder(1, "Пересдать ферритин и ОАК", now + 60 * DAY)),
+            reminders = listOf(Reminder(1, "Пересдать ферритин и ОАК", now + 60 * DAY), Reminder(2, "Пора принять: железо 1 таблетка", now + DAY / 2, daily = true, until = now + 90 * DAY)),
         )
     }
 }

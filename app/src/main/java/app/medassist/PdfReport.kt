@@ -22,8 +22,8 @@ object PdfReport {
 
     private data class Line(val text: String, val size: Float, val bold: Boolean, val gapBefore: Int)
 
-    fun share(context: Context, markdown: String, title: String, patient: String?) {
-        val file = build(context, markdown, title, patient)
+    fun share(context: Context, markdown: String, title: String, patient: String?, heading: String = "МедАнализ — разбор документов") {
+        val file = build(context, markdown, title, patient, heading)
         val uri = FileProvider.getUriForFile(context, context.packageName + ".files", file)
         val send = Intent(Intent.ACTION_SEND)
             .setType("application/pdf")
@@ -33,10 +33,10 @@ object PdfReport {
         context.startActivity(Intent.createChooser(send, "Отправить PDF").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
-    private fun build(context: Context, markdown: String, title: String, patient: String?): File {
+    private fun build(context: Context, markdown: String, title: String, patient: String?, heading: String): File {
         val date = SimpleDateFormat("dd.MM.yyyy", Locale("ru")).format(Date())
         val lines = mutableListOf(
-            Line("МедАнализ — разбор документов", 18f, true, 0),
+            Line(heading, 18f, true, 0),
             Line(listOfNotNull(title, patient?.let { "Пациент: $it" }, "PDF создан $date").joinToString("  ·  "), 9f, false, 4),
         )
         markdown.lines().forEach { raw -> toLine(raw)?.let(lines::add) }
@@ -103,6 +103,9 @@ object PdfReport {
     private fun toLine(raw: String): Line? {
         val t = raw.trimEnd()
         if (t.isBlank()) return null
+        val plain = t.replace("**", "").trim()
+        if (plain.startsWith("СТАТУС:") || plain.startsWith("ЗАГОЛОВОК:")) return null
+        if (plain.startsWith("КОРОТКО:")) return Line(plain.removePrefix("КОРОТКО:").trim(), 11f, true, 8)
         if (Regex("^\\|?\\s*:?-{2,}").containsMatchIn(t)) return null // table separator row
         val heading = Regex("^(#{1,6})\\s+(.*)").find(t)
         if (heading != null) {

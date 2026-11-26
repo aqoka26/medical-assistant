@@ -29,6 +29,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.Alarm
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Checklist
@@ -94,6 +95,7 @@ fun ReportScreen(state: UiState, vm: ChatViewModel) {
     }
     var input by rememberSaveable { mutableStateOf("") }
     var remind by remember { mutableStateOf(false) }
+    var remindHint by remember { mutableStateOf<app.medassist.core.Retest.Hint?>(null) }
     val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         val heard = r.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
         if (!heard.isNullOrBlank()) input = if (input.isBlank()) heard else "$input $heard"
@@ -150,6 +152,10 @@ fun ReportScreen(state: UiState, vm: ChatViewModel) {
                 if (shown.intro.isNotBlank() && shown.sections.isEmpty()) item { MarkdownCard(shown.intro) }
             } else if (shown != null && shown.intro.isNotBlank()) {
                 item { MarkdownCard(shown.intro) }
+            }
+            val hint = reportMsg?.let { app.medassist.core.Retest.find(it.text) }
+            if (hint != null && !state.sending && state.reminders.none { it.text == hint.text }) {
+                item { RetestCard(hint) { remindHint = hint } }
             }
             if (state.sending && reportMsg == null) item { PreparingCard(state.status, started = !state.streamingText.isNullOrBlank()) }
 
@@ -219,6 +225,7 @@ fun ReportScreen(state: UiState, vm: ChatViewModel) {
         }
     }
     if (remind) ReminderDialog(vm) { remind = false }
+    remindHint?.let { h -> ReminderDialog(vm, initialText = h.text, initialDays = h.days) { remindHint = null } }
 }
 
 @Composable
@@ -260,6 +267,7 @@ private fun lookFor(title: String): SectionLook {
     val a = LocalAccents.current
     val t = title.lowercase()
     return when {
+        "измен" in t -> SectionLook(Icons.AutoMirrored.Outlined.TrendingUp, a.violet, a.violetBg)
         "главн" in t -> SectionLook(Icons.Outlined.Lightbulb, a.blue, a.blueBg)
         "поряд" in t || "норм" in t -> SectionLook(Icons.Outlined.CheckCircle, a.good, a.goodBg)
         "вниман" in t -> SectionLook(Icons.Outlined.WarningAmber, a.warn, a.warnBg)
@@ -372,4 +380,23 @@ private fun copy(context: Context, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     cm.setPrimaryClip(ClipData.newPlainText("Ответ", text))
     Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+}
+
+@Composable
+private fun RetestCard(hint: app.medassist.core.Retest.Hint, onClick: () -> Unit) {
+    val a = LocalAccents.current
+    AppCard(color = a.warnBg, border = false, padding = 16.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconTile(Icons.Outlined.Alarm, a.warn, MaterialTheme.colorScheme.surface, 40.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Не забыть", style = MaterialTheme.typography.labelMedium, color = a.warn)
+                Text(hint.text, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        Gap(10.dp)
+        androidx.compose.material3.Button(onClick = onClick, shape = MaterialTheme.shapes.medium) {
+            Text("Поставить напоминание")
+        }
+    }
 }
